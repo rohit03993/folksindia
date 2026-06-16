@@ -19,7 +19,7 @@ class RoleSeeder extends Seeder
             );
         }
 
-        $admin = User::query()->where('email', 'rohit03993@gmail.com')->first();
+        $admin = User::query()->where('email', env('ADMIN_EMAIL', 'rohit03993@gmail.com'))->first();
 
         if ($admin) {
             $admin->update(['is_active' => true]);
