@@ -29,6 +29,8 @@ class CrmEnsureAdminCommand extends Command
             File::makeDirectory($sessionPath, 0755, true);
         }
 
+        $this->call('crm:publish-assets');
+
         $this->call('db:seed', ['--class' => AdminUserSeeder::class, '--force' => true]);
 
         $email = env('ADMIN_EMAIL', 'rohit03993@gmail.com');
