@@ -17,7 +17,7 @@ class CrmHint
         'setup.terminology' => 'Rename labels to match your institute — e.g. Class instead of Course, Section instead of Batch. Empty fields use sensible defaults for your institute type.',
         'setup.custom_fields' => 'Optional extra fields on student or enquiry forms (e.g. blood group, previous school). Not used for exam marks — use Tests & Exams → Upload marks.',
         'setup.meeting_for' => 'Choose what appears in the Meeting for dropdown on Search Student and enquiry forms — e.g. Enquiry, Admission, Marketing. Reorder, rename, add, or hide options here.',
-        'setup.site_content' => 'Controls the public website: logo, phone number, homepage text, and gallery. Changes go live immediately after Save.',
+        'setup.site_content' => 'Controls the public website: logo (fixed header frame with drag-to-position crop), phone, homepage text, and gallery.',
         'setup.institute_settings' => 'Receipt and ID card PDF branding. Institute name and phone come from Website → Site Content — set logo here for printed documents.',
         'setup.whatsapp' => 'Enter your Pal Digital API details once, then click Sync templates. After that, send messages from Messaging → WhatsApp Campaigns or from a student profile.',
 
