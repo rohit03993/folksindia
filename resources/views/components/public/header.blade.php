@@ -1,9 +1,15 @@
 @php
+    $initials = collect(preg_split('/\s+/', $institute['name'] ?? 'School CRM'))
+        ->filter()
+        ->take(2)
+        ->map(fn (string $word): string => mb_strtoupper(mb_substr($word, 0, 1)))
+        ->implode('') ?: 'SC';
     $navLinks = [
         ['label' => 'Home', 'url' => route('home'), 'active' => request()->routeIs('home')],
         ['label' => 'Courses', 'url' => route('courses'), 'active' => request()->routeIs('courses')],
         ['label' => 'Gallery', 'url' => route('home').'#gallery', 'active' => false],
         ['label' => 'Contact', 'url' => route('contact'), 'active' => request()->routeIs('contact')],
+        ['label' => 'Login', 'url' => route('login'), 'active' => request()->routeIs('login')],
     ];
 @endphp
 
@@ -33,7 +39,7 @@
                     <img src="{{ $institute['logo_url'] }}" alt="{{ $institute['name'] }}" class="h-10 w-10 shrink-0 rounded-xl object-cover shadow-lg sm:h-12 sm:w-12">
                 @else
                     <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white shadow-lg shadow-brand-500/30 sm:h-12 sm:w-12 sm:text-sm">
-                        FI
+                        {{ $initials }}
                     </div>
                 @endif
                 <div class="min-w-0 leading-tight">

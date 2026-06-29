@@ -3,11 +3,13 @@
 namespace Tests\Unit;
 
 use App\Enums\AdmissionStatus;
+use App\Enums\BatchStatus;
 use App\Enums\CourseStatus;
 use App\Enums\Gender;
 use App\Enums\LeadSource;
 use App\Enums\StudentStatus;
 use App\Models\Admission;
+use App\Models\Batch;
 use App\Models\Course;
 use App\Models\Enquiry;
 use App\Models\Student;
@@ -33,7 +35,7 @@ class CrmDashboardServiceTest extends TestCase
         $course = Course::query()->create([
             'name' => 'Diploma',
             'code' => 'DIP-DASH',
-            'course_type' => 'diploma',
+            'programme_category' => 'coaching',
             'duration' => 6,
             'duration_type' => 'months',
             'fee' => 50000,
@@ -42,10 +44,10 @@ class CrmDashboardServiceTest extends TestCase
 
         $enquiry = Enquiry::query()->create([
             'student_id' => $student->id,
-            'enquiry_number' => 'FI-ENQ-2026-000200',
+            'enquiry_number' => 'CRM-ENQ-2026-000200',
             'course_id' => $course->id,
             'lead_source' => LeadSource::WalkIn,
-            'meeting_for' => 'folks_india',
+            'meeting_for' => 'school',
             'visit_type' => 'first_visit',
             'latest_visit_status' => 'interested',
         ]);
@@ -53,7 +55,7 @@ class CrmDashboardServiceTest extends TestCase
         Admission::query()->create([
             'student_id' => $student->id,
             'enquiry_id' => $enquiry->id,
-            'admission_number' => 'FI-ADM-2026-000200',
+            'admission_number' => 'CRM-ADM-2026-000200',
             'status' => AdmissionStatus::VerificationPending,
         ]);
 
@@ -62,6 +64,53 @@ class CrmDashboardServiceTest extends TestCase
         $this->assertSame(1, $stats['today_enquiries']);
         $this->assertSame(1, $stats['walk_in_today']);
         $this->assertSame(1, $stats['pending_admissions']);
-        $this->assertSame(1, $stats['total_leads']);
+        $this->assertSame(1, $stats['total_enquiries']);
+    }
+
+    public function test_batch_overview_includes_active_batches_without_end_date(): void
+    {
+        $course = Course::query()->create([
+            'name' => 'IIT JEE',
+            'code' => 'JEE-DASH',
+            'programme_category' => 'coaching',
+            'duration' => 12,
+            'duration_type' => 'months',
+            'fee' => 100000,
+            'status' => CourseStatus::Active,
+        ]);
+
+        Batch::query()->create([
+            'name' => 'JEE Target Batch',
+            'course_id' => $course->id,
+            'start_date' => '2026-06-01',
+            'end_date' => null,
+            'status' => BatchStatus::Active,
+        ]);
+
+        Batch::query()->create([
+            'name' => 'NEET Target Batch',
+            'course_id' => $course->id,
+            'start_date' => '2026-06-01',
+            'end_date' => '2026-12-31',
+            'status' => BatchStatus::Active,
+        ]);
+
+        Batch::query()->create([
+            'name' => 'Old Completed Batch',
+            'course_id' => $course->id,
+            'start_date' => '2025-06-01',
+            'end_date' => '2025-12-31',
+            'status' => BatchStatus::Completed,
+        ]);
+
+        CrmDashboardService::flushAllCaches();
+
+        $overview = app(CrmDashboardService::class)->batchOverview();
+
+        $this->assertCount(2, $overview['rows']);
+
+        $labels = collect($overview['rows'])->pluck('label')->implode(' | ');
+        $this->assertStringContainsString('JEE Target Batch', $labels);
+        $this->assertStringContainsString('NEET Target Batch', $labels);
     }
 }

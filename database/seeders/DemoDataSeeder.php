@@ -2,66 +2,78 @@
 
 namespace Database\Seeders;
 
+use App\Enums\BatchShift;
 use App\Enums\BatchStatus;
+use App\Enums\CourseStatus;
 use App\Enums\Gender;
+use App\Enums\InstituteType;
 use App\Enums\LeadSource;
+use App\Enums\PaymentShortfallAction;
 use App\Enums\RoleName;
 use App\Enums\StudentCategory;
 use App\Enums\StudentStatus;
+use App\Models\AcademicSession;
+use App\Models\ActivitySession;
+use App\Models\ActivityType;
 use App\Models\Batch;
 use App\Models\Course;
+use App\Models\FeeStructure;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\ActivityAttendanceService;
 use App\Services\AdmissionService;
 use App\Services\BatchService;
 use App\Services\EnquiryService;
+use App\Services\EnrollmentRollNumberService;
 use App\Services\PaymentService;
+use App\Services\ResultDeclarationService;
 use App\Services\StudentAuthService;
 use App\Support\DefaultCourse;
+use App\Support\DefaultProgrammes;
+use App\Support\FeePaymentPolicy;
+use App\Support\FeePlanCalculator;
+use App\Support\InstituteProfile;
+use App\Support\PaymentShortfallHelper;
 use Illuminate\Database\Seeder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Role;
 
 class DemoDataSeeder extends Seeder
 {
     public function run(): void
     {
-        if (Student::query()->exists() && ! filter_var(env('DEMO_SEED_FORCE', false), FILTER_VALIDATE_BOOL)) {
-            $this->command?->warn('Demo data skipped — students already exist. Set DEMO_SEED_FORCE=true in .env to seed anyway.');
+        $staff = $this->demoStaff();
+        $superAdmin = $this->superAdmin();
+        $session = AcademicSession::current();
+
+        if (! $session) {
+            $this->command?->error('Run AcademicSessionSeeder first.');
 
             return;
         }
 
-        $staff = $this->demoStaff();
-        $diploma = Course::query()->where('code', 'DIP-HM-6M')->first()
-            ?? Course::query()->where('course_type', 'diploma')->first();
-        $bsc = Course::query()->where('code', 'BSC-HM-3Y')->first()
-            ?? Course::query()->where('course_type', 'bsc')->first();
+        $instituteType = InstituteProfile::type();
+        $this->seedDemoCourses($instituteType);
+        $primaryCourse = $this->primaryCourseForType($instituteType);
 
-        if (! $diploma || ! $bsc) {
+        if (! $primaryCourse) {
             $this->command?->error('Run CourseSeeder first.');
 
             return;
         }
 
-        if ((float) $diploma->fee <= 0) {
-            $diploma->update(['fee' => 45000]);
-        }
-
-        if ((float) $bsc->fee <= 0) {
-            $bsc->update(['fee' => 120000]);
-        }
-
         $enquiries = app(EnquiryService::class);
 
+        // --- Leads only (no student record yet) ---
         $enquiries->create([
             'name' => 'Aarav Sharma',
             'father_name' => 'Mr Sharma',
             'mobile' => '9811000001',
             'gender' => Gender::Male->value,
-            'course_id' => $diploma->id,
-            'discussion_summary' => 'Walk-in — interested in 6 month diploma.',
+            'course_id' => $primaryCourse->id,
+            'discussion_summary' => 'Walk-in — interested in '.$primaryCourse->name.'.',
             'visit_status' => 'interested',
         ], $staff, LeadSource::WalkIn);
 
@@ -70,8 +82,8 @@ class DemoDataSeeder extends Seeder
             'father_name' => 'Mrs Verma',
             'mobile' => '9811000002',
             'gender' => Gender::Female->value,
-            'course_id' => $bsc->id,
-            'discussion_summary' => 'Website enquiry for BSc programme.',
+            'course_id' => $primaryCourse->id,
+            'discussion_summary' => 'Website enquiry — follow up next week.',
             'visit_status' => 'follow_up_required',
         ], $staff, LeadSource::Website);
 
@@ -80,11 +92,12 @@ class DemoDataSeeder extends Seeder
             'mobile' => '9811000003',
             'gender' => Gender::Male->value,
             'course_id' => DefaultCourse::undecided()->id,
-            'discussion_summary' => 'Quick walk-in, course not decided yet.',
+            'discussion_summary' => 'Walk-in — course not decided yet.',
             'visit_status' => 'interested',
         ], $staff, LeadSource::WalkIn);
 
-        $admissionStudent = Student::query()->create([
+        // --- Admission in progress (fee plan with installments, not yet enrolled) ---
+        $neha = Student::query()->create([
             'name' => 'Neha Singh',
             'father_name' => 'Mr Singh',
             'date_of_birth' => '2002-04-18',
@@ -96,43 +109,266 @@ class DemoDataSeeder extends Seeder
             'portal_password' => app(StudentAuthService::class)->hashPortalPassword('18042002'),
         ]);
 
-        $nehaEnquiry = $enquiries->createForExistingStudent($admissionStudent, [
-            'course_id' => $diploma->id,
-            'discussion_summary' => 'Ready to proceed with admission.',
+        $nehaEnquiry = $enquiries->createForExistingStudent($neha, [
+            'course_id' => $primaryCourse->id,
+            'discussion_summary' => 'Ready for admission — fee plan agreed.',
             'visit_status' => 'interested',
         ], $staff, LeadSource::WalkIn);
 
-        $admissions = app(AdmissionService::class);
-        $admission = $admissions->convert($nehaStudent, $nehaEnquiry, $staff, [
-            'course_id' => $diploma->id,
-            'discount_amount' => 5000,
+        $nehaNet = round((float) $primaryCourse->fee - 10000 + 5000, 2);
+        $nehaHalf = round($nehaNet / 2, 2);
+        $nehaBalance = round($nehaNet - $nehaHalf, 2);
+
+        app(AdmissionService::class)->convert($neha, $nehaEnquiry, $staff, [
+            'course_id' => $primaryCourse->id,
+            'discount_amount' => 10000,
+            'use_installment_plan' => true,
+            'misc_fees' => [
+                ['label' => 'Transport', 'amount' => 5000],
+            ],
+            'installment_plan' => [
+                ['label' => 'Installment 1', 'amount' => $nehaHalf, 'due_date' => now()->toDateString()],
+                ['label' => 'Installment 2', 'amount' => $nehaBalance, 'due_date' => now()->addMonth()->toDateString()],
+            ],
         ]);
 
-        $enrolledStudent = Student::query()->create([
-            'name' => 'Rohit Kumar',
-            'father_name' => 'Mr Kumar',
-            'date_of_birth' => '2001-08-09',
-            'gender' => Gender::Male,
-            'mobile' => '9811000005',
-            'email' => 'rohit.demo@example.com',
+        // --- Fully enrolled student with installments + partial payment ---
+        $demo = $this->demoProfileForType($instituteType);
+
+        $batch = $this->createBatch(
+            session: $session,
+            course: $primaryCourse,
+            staff: $staff,
+            name: $demo['batch_name'],
+            section: $demo['section'],
+            shift: $demo['shift'],
+        );
+
+        $enrolledStudent = $this->seedEnrolledStudent(
+            staff: $staff,
+            approver: $superAdmin,
+            name: $demo['name'],
+            mobile: $demo['mobile'],
+            dob: $demo['dob'],
+            course: $primaryCourse,
+            batch: $batch,
+            discount: $demo['discount'],
+            payment: $demo['payment'],
+            gender: $demo['gender'],
+        );
+
+        $studentTwo = $this->seedEnrolledStudent(
+            staff: $staff,
+            approver: $superAdmin,
+            name: 'Sneha Gupta',
+            mobile: '9811000008',
+            dob: '2001-03-12',
+            course: $primaryCourse,
+            batch: $batch,
+            discount: 8000,
+            payment: 12000,
+            gender: Gender::Female,
+        );
+
+        $studentThree = $this->seedEnrolledStudent(
+            staff: $staff,
+            approver: $superAdmin,
+            name: 'Amit Verma',
+            mobile: '9811000009',
+            dob: '2001-11-05',
+            course: $primaryCourse,
+            batch: $batch,
+            discount: 5000,
+            payment: 10000,
+            gender: Gender::Male,
+        );
+
+        $rolls = app(EnrollmentRollNumberService::class);
+        $enrollmentOne = $enrolledStudent->activeEnrollment;
+        $enrollmentTwo = $studentTwo->activeEnrollment;
+        $enrollmentThree = $studentThree->activeEnrollment;
+
+        if ($enrollmentOne) {
+            $rolls->update($enrollmentOne, '101', $staff);
+        }
+
+        if ($enrollmentTwo) {
+            $rolls->update($enrollmentTwo, '102', $staff);
+        }
+
+        if ($enrollmentThree) {
+            $rolls->update($enrollmentThree, '103', $staff);
+        }
+
+        $classStudents = [
+            $enrolledStudent->fresh(),
+            $studentTwo->fresh(),
+            $studentThree->fresh(),
+        ];
+
+        $this->seedDemoActivities($staff, $batch, $classStudents, $instituteType);
+        $this->seedDemoPublishedResults($instituteType);
+
+        if ($instituteType === InstituteType::Hospitality) {
+            $this->seedDemoWorkshops($staff, $batch, $classStudents);
+        }
+
+        $this->printSummary($instituteType, $primaryCourse, $demo, $nehaNet);
+    }
+
+    protected function seedDemoCourses(InstituteType $type): void
+    {
+        foreach (DefaultProgrammes::forType($type) as $course) {
+            Course::query()->updateOrCreate(
+                ['code' => $course['code']],
+                [
+                    ...$course,
+                    'status' => CourseStatus::Active,
+                    'show_on_website' => true,
+                ],
+            );
+        }
+    }
+
+    protected function primaryCourseForType(InstituteType $type): ?Course
+    {
+        $code = match ($type) {
+            InstituteType::School => 'SCH-12-COM',
+            InstituteType::Coaching => 'COACH-JEE-1Y',
+            InstituteType::College => 'COL-BCOM-2Y',
+            InstituteType::Hospitality => 'HM-BSC-3Y',
+        };
+
+        return Course::query()->where('code', $code)->first();
+    }
+
+    /**
+     * @return array{name: string, mobile: string, dob: string, dob_password: string, gender: Gender, batch_name: string, section: ?string, shift: BatchShift, discount: int, payment: int}
+     */
+    protected function demoProfileForType(InstituteType $type): array
+    {
+        return match ($type) {
+            InstituteType::School => [
+                'name' => 'Rohit Kumar',
+                'mobile' => '9811000005',
+                'dob' => '2001-08-09',
+                'dob_password' => '09082001',
+                'gender' => Gender::Male,
+                'batch_name' => 'Class 12-A',
+                'section' => 'A',
+                'shift' => BatchShift::Morning,
+                'discount' => 10000,
+                'payment' => 15000,
+            ],
+            InstituteType::Coaching => [
+                'name' => 'Arjun Patel',
+                'mobile' => '9811000006',
+                'dob' => '2003-01-15',
+                'dob_password' => '15012003',
+                'gender' => Gender::Male,
+                'batch_name' => 'JEE Batch 2026',
+                'section' => null,
+                'shift' => BatchShift::Evening,
+                'discount' => 5000,
+                'payment' => 20000,
+            ],
+            InstituteType::College => [
+                'name' => 'Ananya Reddy',
+                'mobile' => '9811000007',
+                'dob' => '2002-11-22',
+                'dob_password' => '22112002',
+                'gender' => Gender::Female,
+                'batch_name' => 'B.Com Sem 2',
+                'section' => 'B',
+                'shift' => BatchShift::Morning,
+                'discount' => 8000,
+                'payment' => 18000,
+            ],
+            InstituteType::Hospitality => [
+                'name' => 'Rohit Kumar',
+                'mobile' => '9811000005',
+                'dob' => '2001-08-09',
+                'dob_password' => '09082001',
+                'gender' => Gender::Male,
+                'batch_name' => 'HM Batch A — 2026',
+                'section' => 'A',
+                'shift' => BatchShift::Morning,
+                'discount' => 15000,
+                'payment' => 25000,
+            ],
+        };
+    }
+
+    protected function createBatch(
+        AcademicSession $session,
+        Course $course,
+        User $staff,
+        string $name,
+        ?string $section,
+        BatchShift $shift,
+    ): Batch {
+        return Batch::query()->create([
+            'name' => $name,
+            'course_id' => $course->id,
+            'academic_session_id' => $session->id,
+            'section' => $section,
+            'shift' => $shift,
+            'trainer_user_id' => $staff->id,
+            'start_date' => $session->starts_on->toDateString(),
+            'end_date' => $session->ends_on->toDateString(),
+            'status' => BatchStatus::Active,
+        ]);
+    }
+
+    protected function seedEnrolledStudent(
+        User $staff,
+        User $approver,
+        string $name,
+        string $mobile,
+        string $dob,
+        Course $course,
+        Batch $batch,
+        int $discount,
+        int $payment,
+        Gender $gender = Gender::Male,
+    ): Student {
+        $dobPassword = app(StudentAuthService::class)->hashPortalPassword(
+            str_replace('-', '', date('dmY', strtotime($dob))),
+        );
+
+        $student = Student::query()->create([
+            'name' => $name,
+            'father_name' => 'Mr '.explode(' ', $name)[0],
+            'date_of_birth' => $dob,
+            'gender' => $gender,
+            'mobile' => $mobile,
+            'email' => strtolower(str_replace(' ', '.', $name)).'.demo@example.com',
             'category' => StudentCategory::General,
             'status' => StudentStatus::Enquiry,
-            'portal_password' => app(StudentAuthService::class)->hashPortalPassword('09082001'),
+            'portal_password' => $dobPassword,
         ]);
 
-        $rohitEnquiry = $enquiries->createForExistingStudent($enrolledStudent, [
-            'course_id' => $bsc->id,
-            'discussion_summary' => 'Enrolled demo student with payment.',
+        $netFee = round((float) $course->fee - $discount, 2);
+        $installmentPlan = FeePlanCalculator::defaultTwoPartPlan($netFee);
+
+        $enquiries = app(EnquiryService::class);
+        $admissions = app(AdmissionService::class);
+
+        $enquiry = $enquiries->createForExistingStudent($student, [
+            'course_id' => $course->id,
+            'discussion_summary' => "Enrolled demo — {$course->name}.",
             'visit_status' => 'interested',
         ], $staff, LeadSource::WalkIn);
 
-        $rohitAdmission = $admissions->convert($enrolledStudent, $rohitEnquiry, $staff, [
-            'course_id' => $bsc->id,
-            'discount_amount' => 10000,
+        $admission = $admissions->convert($student, $enquiry, $staff, [
+            'course_id' => $course->id,
+            'discount_amount' => $discount,
+            'use_installment_plan' => true,
+            'installment_plan' => $installmentPlan,
         ]);
 
-        $rohitAdmission = $admissions->submitForm(
-            $rohitAdmission,
+        $admission = $admissions->submitForm(
+            $admission,
             [
                 'tenth_board' => 'CBSE',
                 'tenth_percentage' => 82,
@@ -148,49 +384,335 @@ class DemoDataSeeder extends Seeder
             $staff,
         );
 
-        $enrollment = $admissions->approve($rohitAdmission, $staff);
+        $enrollment = $admissions->approve($admission, $approver);
+        app(BatchService::class)->assign($student, $batch, $staff);
+
         $feeStructure = $enrollment->feeStructure;
 
-        $batch = Batch::query()->firstOrCreate(
-            ['name' => 'Demo Batch — '.now()->format('M Y')],
-            [
-                'course_id' => $bsc->id,
-                'trainer_user_id' => $staff->id,
-                'start_date' => now()->subWeeks(2)->toDateString(),
-                'end_date' => now()->addMonths(6)->toDateString(),
-                'status' => BatchStatus::Active,
-            ],
-        );
-
-        app(BatchService::class)->assign($enrolledStudent, $batch, $staff);
-
-        if ($feeStructure) {
+        if ($feeStructure && $payment > 0) {
             app(PaymentService::class)->add(
                 $feeStructure,
-                $enrolledStudent,
-                [
-                    'payment_date' => now()->toDateString(),
-                    'amount' => 15000,
-                    'payment_mode' => 'cash',
-                    'voucher_number' => 'DEMO-V001',
-                ],
+                $student,
+                $this->demoPaymentPayload(
+                    $feeStructure,
+                    $payment,
+                    'DEMO-'.strtoupper(substr($name, 0, 3)),
+                ),
                 UploadedFile::fake()->image('proof.jpg'),
                 $staff,
             );
         }
 
-        $this->command?->info('Demo CRM data seeded.');
-        $this->command?->line('Staff login: demo@folksindia.com / password');
-        $this->command?->line('Enrolled student portal: 9811000005 / DOB password 09082001');
-        $this->command?->warn('Admission demo (Neha Singh): 9811000004 — form not yet submitted.');
+        return $student->fresh(['activeEnrollment']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function demoPaymentPayload(FeeStructure $feeStructure, float $amount, string $voucherNumber): array
+    {
+        $feeStructure->loadMissing('installments');
+
+        $payload = [
+            'payment_date' => now()->toDateString(),
+            'amount' => $amount,
+            'payment_mode' => 'cash',
+            'voucher_number' => $voucherNumber,
+        ];
+
+        if (! FeePaymentPolicy::usesFlexibleAllocation() || $feeStructure->installments->isEmpty()) {
+            return $payload;
+        }
+
+        $installment = $feeStructure->installments->sortBy('sort_order')->first();
+
+        if (! $installment || PaymentShortfallHelper::shortfallAmount($amount, $installment) <= 0) {
+            return $payload;
+        }
+
+        if (PaymentShortfallHelper::hasNextPayableInstallment($installment)) {
+            $payload['shortfall_action'] = PaymentShortfallAction::CarryForward->value;
+
+            return $payload;
+        }
+
+        $payload['shortfall_action'] = PaymentShortfallAction::NewInstallment->value;
+        $payload['shortfall_due_date'] = now()->addMonth()->toDateString();
+        $payload['shortfall_label'] = PaymentShortfallHelper::suggestNewInstallmentLabel($feeStructure->id);
+
+        return $payload;
+    }
+
+    /**
+     * @param  list<Student>  $students
+     */
+    protected function seedDemoActivities(
+        User $staff,
+        Batch $batch,
+        array $students,
+        InstituteType $instituteType,
+    ): void {
+        $examType = ActivityType::query()->where('slug', 'exam')->first();
+        $mockType = ActivityType::query()->where('slug', 'mock_test')->first();
+
+        if (! $examType || ! $mockType) {
+            $this->command?->warn('Exam types missing — run ActivityTypeSeeder first.');
+
+            return;
+        }
+
+        $type = $instituteType === InstituteType::Coaching ? $mockType : $examType;
+        $tests = $this->demoExamTestsForType($instituteType);
+
+        foreach ($tests as $test) {
+            $this->seedTestMarks($staff, $batch, $students, $type, $test);
+        }
+
+        $this->command?->line('Demo marks: '.count($tests).' test(s) · rolls 101–103 · student profile shows subject columns');
+    }
+
+    protected function seedDemoPublishedResults(InstituteType $instituteType): void
+    {
+        $tests = $this->demoExamTestsForType($instituteType);
+
+        if ($tests === []) {
+            return;
+        }
+
+        $firstTest = $tests[0];
+        $groupKey = Str::slug($firstTest['name']).'-'.$firstTest['date'];
+        $staff = $this->demoStaff();
+        $admin = $this->superAdmin();
+        $declarations = app(ResultDeclarationService::class);
+
+        try {
+            $declarations->publish($groupKey, $staff, now()->subDays(2)->toDateString());
+            $declarations->issueMarksheets($groupKey, $admin, now()->subDay()->toDateString());
+
+            $this->command?->line("Demo results: {$firstTest['name']} published + PDF marksheets issued (July test stays unpublished)");
+        } catch (\Throwable $exception) {
+            $this->command?->warn('Could not seed demo results: '.$exception->getMessage());
+        }
+    }
+
+    /**
+     * @param  list<Student>  $students
+     * @param  array{
+     *     name: string,
+     *     date: string,
+     *     max_marks: int|float,
+     *     subjects: array<string, array<string, int|float>>
+     * }  $test
+     */
+    protected function seedTestMarks(
+        User $staff,
+        Batch $batch,
+        array $students,
+        ActivityType $type,
+        array $test,
+    ): void {
+        $attendance = app(ActivityAttendanceService::class);
+        $testKey = Str::slug($test['name']).'-'.$test['date'];
+
+        foreach ($test['subjects'] as $subject => $marksByRoll) {
+            $session = ActivitySession::query()->create([
+                'activity_type_id' => $type->id,
+                'title' => "{$test['name']} — {$subject}",
+                'session_date' => $test['date'],
+                'batch_id' => $batch->id,
+                'metadata' => [
+                    'test_key' => $testKey,
+                    'test_name' => $test['name'],
+                    'subject' => $subject,
+                    'max_marks' => $test['max_marks'],
+                ],
+                'created_by_user_id' => $staff->id,
+            ]);
+
+            $scores = [];
+
+            foreach ($students as $student) {
+                $roll = strtoupper((string) ($student->activeEnrollment?->enrollment_number ?? ''));
+
+                if ($roll === '' || ! isset($marksByRoll[$roll])) {
+                    continue;
+                }
+
+                $scores[$student->id] = $marksByRoll[$roll];
+            }
+
+            if ($scores !== []) {
+                $attendance->importStudentScores($session, $scores, $staff);
+            }
+        }
+    }
+
+    /**
+     * @return list<array{
+     *     name: string,
+     *     date: string,
+     *     max_marks: int|float,
+     *     subjects: array<string, array<string, int|float>>
+     * }>
+     */
+    protected function demoExamTestsForType(InstituteType $instituteType): array
+    {
+        return match ($instituteType) {
+            InstituteType::School => [
+                [
+                    'name' => 'Unit Test — June 2026',
+                    'date' => now()->subDays(15)->toDateString(),
+                    'max_marks' => 50,
+                    'subjects' => [
+                        'Mathematics' => ['101' => 42, '102' => 38, '103' => 45],
+                        'Physics' => ['101' => 35, '102' => 40, '103' => 33],
+                        'Chemistry' => ['101' => 44, '102' => 41, '103' => 39],
+                    ],
+                ],
+                [
+                    'name' => 'Unit Test — July 2026',
+                    'date' => now()->subDays(3)->toDateString(),
+                    'max_marks' => 50,
+                    'subjects' => [
+                        'Mathematics' => ['101' => 40, '102' => 43, '103' => 41],
+                        'Physics' => ['101' => 36, '102' => 38, '103' => 35],
+                        'Chemistry' => ['101' => 42, '102' => 40, '103' => 44],
+                        'Biology' => ['101' => 38, '102' => 36, '103' => 40],
+                    ],
+                ],
+            ],
+            InstituteType::Coaching => [
+                [
+                    'name' => 'Mock Test — June 2026',
+                    'date' => now()->subDays(15)->toDateString(),
+                    'max_marks' => 100,
+                    'subjects' => [
+                        'Physics' => ['101' => 72, '102' => 68, '103' => 75],
+                        'Chemistry' => ['101' => 65, '102' => 70, '103' => 62],
+                    ],
+                ],
+                [
+                    'name' => 'Mock Test — July 2026',
+                    'date' => now()->subDays(3)->toDateString(),
+                    'max_marks' => 100,
+                    'subjects' => [
+                        'Physics' => ['101' => 78, '102' => 74, '103' => 80],
+                        'Chemistry' => ['101' => 70, '102' => 72, '103' => 68],
+                        'Mathematics' => ['101' => 82, '102' => 79, '103' => 85],
+                    ],
+                ],
+            ],
+            InstituteType::College => [
+                [
+                    'name' => 'Internal — June 2026',
+                    'date' => now()->subDays(15)->toDateString(),
+                    'max_marks' => 40,
+                    'subjects' => [
+                        'Business Law' => ['101' => 31, '102' => 28, '103' => 34],
+                        'Financial Accounting' => ['101' => 36, '102' => 33, '103' => 38],
+                    ],
+                ],
+                [
+                    'name' => 'Internal — July 2026',
+                    'date' => now()->subDays(3)->toDateString(),
+                    'max_marks' => 40,
+                    'subjects' => [
+                        'Business Law' => ['101' => 33, '102' => 30, '103' => 35],
+                        'Financial Accounting' => ['101' => 34, '102' => 32, '103' => 36],
+                        'Economics' => ['101' => 29, '102' => 31, '103' => 30],
+                    ],
+                ],
+            ],
+            InstituteType::Hospitality => [
+                [
+                    'name' => 'Internal Assessment — June 2026',
+                    'date' => now()->subDays(20)->toDateString(),
+                    'max_marks' => 50,
+                    'subjects' => [
+                        'Front Office Operations' => ['101' => 42, '102' => 38, '103' => 45],
+                        'Food & Beverage Service' => ['101' => 40, '102' => 43, '103' => 39],
+                        'Housekeeping' => ['101' => 44, '102' => 41, '103' => 46],
+                    ],
+                ],
+                [
+                    'name' => 'Internal Assessment — July 2026',
+                    'date' => now()->subDays(5)->toDateString(),
+                    'max_marks' => 50,
+                    'subjects' => [
+                        'Front Office Operations' => ['101' => 43, '102' => 40, '103' => 44],
+                        'Food & Beverage Service' => ['101' => 41, '102' => 45, '103' => 42],
+                        'Housekeeping' => ['101' => 45, '102' => 42, '103' => 47],
+                        'Food Production' => ['101' => 39, '102' => 41, '103' => 38],
+                    ],
+                ],
+            ],
+        };
+    }
+
+    /**
+     * @param  list<Student>  $students
+     */
+    protected function seedDemoWorkshops(User $staff, Batch $batch, array $students): void
+    {
+        $workshopType = ActivityType::query()->where('slug', 'workshop')->first();
+        $eventType = ActivityType::query()->where('slug', 'event')->first();
+
+        if (! $workshopType || ! $eventType) {
+            $this->command?->warn('Workshop/event types missing — run ActivityTypeSeeder first.');
+
+            return;
+        }
+
+        $attendance = app(ActivityAttendanceService::class);
+        $sessions = [
+            [
+                'type' => $workshopType,
+                'title' => 'Bar Operations Practical',
+                'date' => now()->subDays(12)->toDateString(),
+                'present_rolls' => ['101', '102', '103'],
+            ],
+            [
+                'type' => $workshopType,
+                'title' => 'Kitchen Hygiene & Safety',
+                'date' => now()->subDays(8)->toDateString(),
+                'present_rolls' => ['101', '102'],
+            ],
+            [
+                'type' => $eventType,
+                'title' => 'Hotel Industry Orientation',
+                'date' => now()->subDays(25)->toDateString(),
+                'present_rolls' => ['101', '102', '103'],
+            ],
+        ];
+
+        foreach ($sessions as $sessionData) {
+            $session = $attendance->findOrCreateSession(
+                $sessionData['type']->id,
+                $batch->id,
+                $sessionData['date'],
+                $sessionData['title'],
+                $staff,
+            );
+
+            $marks = [];
+
+            foreach ($students as $student) {
+                $roll = strtoupper((string) ($student->activeEnrollment?->enrollment_number ?? ''));
+                $marks[$student->id] = in_array($roll, $sessionData['present_rolls'], true);
+            }
+
+            $attendance->saveMarks($session, $marks, $staff);
+        }
+
+        $this->command?->line('Demo workshops/events: 3 sessions with attendance marked');
     }
 
     protected function demoStaff(): User
     {
         Role::query()->firstOrCreate(['name' => RoleName::Staff->value, 'guard_name' => 'web']);
 
-        $user = User::query()->firstOrCreate(
-            ['email' => 'demo@folksindia.com'],
+        $user = User::query()->updateOrCreate(
+            ['email' => 'demo@example.com'],
             [
                 'name' => 'Demo Staff',
                 'password' => Hash::make('password'),
@@ -199,8 +721,44 @@ class DemoDataSeeder extends Seeder
             ],
         );
 
-        $user->assignRole(RoleName::Staff->value);
+        if (! $user->hasRole(RoleName::Staff->value)) {
+            $user->assignRole(RoleName::Staff->value);
+        }
 
         return $user;
+    }
+
+    protected function superAdmin(): User
+    {
+        $mobile = (string) env('ADMIN_MOBILE', '9876543210');
+
+        return User::query()
+            ->where('mobile', $mobile)
+            ->orWhereHas('roles', fn ($query) => $query->where('name', RoleName::SuperAdmin->value))
+            ->firstOrFail();
+    }
+
+    protected function printSummary(InstituteType $instituteType, Course $course, array $demo, float $nehaNet): void
+    {
+        $this->command?->newLine();
+        $this->command?->info('=== Fresh demo data ('.$instituteType->label().') ===');
+        $this->command?->line('Primary course: '.$course->name.' · Fee ₹'.number_format((float) $course->fee, 2));
+        $this->command?->newLine();
+        $this->command?->line('Super Admin: '.env('ADMIN_EMAIL', 'rohit03993@gmail.com').' / '.env('ADMIN_PASSWORD', 'Admin@2026'));
+        $this->command?->line('Staff: demo@example.com / password');
+        $this->command?->newLine();
+        $this->command?->line('Leads: Aarav 9811000001 · Priya 9811000002 · Karan 9811000003 (undecided course)');
+        $this->command?->line("Admission pending: Neha Singh 9811000004 · net ₹".number_format($nehaNet, 2).' · 2 installments + transport');
+        $this->command?->line("Enrolled: {$demo['name']} roll 101 · Sneha Gupta roll 102 · Amit Verma roll 103 · partial fees paid");
+
+        if ($instituteType === InstituteType::Hospitality) {
+            $this->command?->line('Marks: Student profile → Exam tab — June published + PDF · July still draft');
+            $this->command?->line('Portal: login as roll 101 — Marks tab shows June internal assessment only');
+            $this->command?->line('Activities: Workshops tab — Bar Operations, Kitchen Hygiene, Industry Orientation');
+            $this->command?->line('Courses: BSc HM · Diploma HM · Certificate Food Production');
+        } else {
+            $this->command?->line('Marks: Student profile → Exam tab — first test published + PDF · second test still draft');
+            $this->command?->line('Import Marks: use rolls 101–103 · template under Academics → Import Marks');
+        }
     }
 }

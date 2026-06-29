@@ -3,7 +3,7 @@
 namespace App\Models;
 
 use App\Enums\CourseStatus;
-use App\Enums\CourseType;
+use App\Enums\ProgrammeCategory;
 use App\Enums\DurationType;
 use App\Support\DefaultCourse;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,23 +16,34 @@ class Course extends Model
     protected $fillable = [
         'name',
         'code',
-        'course_type',
+        'programme_category',
         'duration',
         'duration_type',
         'fee',
         'description',
         'status',
+        'show_on_website',
     ];
 
     protected function casts(): array
     {
         return [
-            'course_type' => CourseType::class,
+            'programme_category' => ProgrammeCategory::class,
             'duration_type' => DurationType::class,
             'status' => CourseStatus::class,
             'fee' => 'decimal:2',
             'duration' => 'integer',
+            'show_on_website' => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (Course $course): void {
+            if ($course->programme_category === null) {
+                $course->programme_category = ProgrammeCategory::Custom;
+            }
+        });
     }
 
     protected function code(): Attribute
@@ -83,6 +94,11 @@ class Course extends Model
         return $this->hasMany(Enrollment::class);
     }
 
+    public function installmentTemplates(): HasMany
+    {
+        return $this->hasMany(CourseInstallmentTemplate::class)->orderBy('sort_order');
+    }
+
     /**
      * @return array{can_delete: bool, reason: ?string}
      */
@@ -95,11 +111,16 @@ class Course extends Model
             ];
         }
 
+        $batchCount = $this->batches()->count();
         $enquiryCount = $this->enquiries()->count();
         $enrollmentCount = $this->enrollments()->count();
 
-        if ($enquiryCount > 0 || $enrollmentCount > 0) {
+        if ($batchCount > 0 || $enquiryCount > 0 || $enrollmentCount > 0) {
             $parts = [];
+
+            if ($batchCount > 0) {
+                $parts[] = $batchCount.' '.str('batch')->plural($batchCount);
+            }
 
             if ($enquiryCount > 0) {
                 $parts[] = $enquiryCount.' '.str('enquiry')->plural($enquiryCount);
@@ -111,8 +132,8 @@ class Course extends Model
 
             return [
                 'can_delete' => false,
-                'reason' => 'This course is linked to '.implode(' and ', $parts)
-                    .'. Set status to Inactive instead of deleting — history must stay intact.',
+                'reason' => 'This course is linked to '.implode(', ', $parts)
+                    .'. Remove or reassign those records first, or set status to Inactive instead of deleting.',
             ];
         }
 

@@ -4,9 +4,17 @@ namespace App\Http\Controllers\StudentPortal;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\StudentPortal\Concerns\ResolvesPortalStudent;
+use App\Enums\ResultDeclarationStatus;
+use App\Models\ActivityType;
 use App\Models\Admission;
 use App\Models\Payment;
+use App\Models\ResultDeclaration;
+use App\Models\StudentMarksheet;
+use App\Services\ActivityAttendanceService;
 use App\Services\AdmissionService;
+use App\Services\AttendanceService;
+use App\Support\PublishedResultsGate;
+use App\Support\StudentExamMarksMatrix;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -36,6 +44,45 @@ class DashboardController extends Controller
                 ->get()
             : collect();
 
+        $examMarksSections = [];
+        $publishedResults = [];
+        $sessionAttendanceRecords = collect();
+        $classAttendancePercentage = null;
+
+        if ($enrollment) {
+            $attendance = app(ActivityAttendanceService::class);
+            $sessionAttendanceRecords = $attendance->sessionAttendanceRecordsForStudent($student);
+            $classAttendancePercentage = app(AttendanceService::class)->percentageForStudent($student);
+
+            foreach (ActivityType::query()->enabled()->ordered()->get() as $activityType) {
+                if (! $activityType->supportsScoring()) {
+                    continue;
+                }
+
+                $records = PublishedResultsGate::filterRecordsForPortal(
+                    $attendance->presentRecordsForStudent($student, $activityType),
+                );
+
+                if ($records->isEmpty()) {
+                    continue;
+                }
+
+                $examMarksSections[] = [
+                    'label' => $activityType->name,
+                    'matrix' => StudentExamMarksMatrix::fromRecords($records),
+                ];
+            }
+
+            $publishedResults = StudentMarksheet::query()
+                ->where('student_id', $student->id)
+                ->whereHas('resultDeclaration', fn ($query) => $query
+                    ->whereNotNull('declared_at')
+                    ->where('status', ResultDeclarationStatus::Published))
+                ->with('resultDeclaration')
+                ->latest('id')
+                ->get();
+        }
+
         return view('portal.dashboard', [
             'student' => $student,
             'admission' => $admission,
@@ -43,6 +90,10 @@ class DashboardController extends Controller
             'enrollment' => $enrollment,
             'fees' => $fees,
             'payments' => $payments,
+            'examMarksSections' => $examMarksSections,
+            'publishedResults' => $publishedResults,
+            'sessionAttendanceRecords' => $sessionAttendanceRecords,
+            'classAttendancePercentage' => $classAttendancePercentage,
         ]);
     }
 

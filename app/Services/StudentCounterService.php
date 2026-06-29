@@ -2,10 +2,10 @@
 
 namespace App\Services;
 
-use App\Enums\ActivityKind;
 use App\Enums\DocumentType;
+use App\Models\ActivityType;
 use App\Enums\LeadSource;
-use App\Enums\MeetingFor;
+use App\Support\MeetingForOptions;
 use App\Enums\ProfilePhase;
 use App\Enums\StudentStatus;
 use App\Models\Admission;
@@ -29,8 +29,7 @@ class StudentCounterService
      *     lead_sources: array{
      *         website_count: int,
      *         walk_in_count: int,
-     *         folks_india_count: int,
-     *         english_coffee_count: int,
+     *         meeting_for_counts: array<string, int>,
      *         first_source: ?LeadSource,
      *         latest_source: ?LeadSource,
      *         latest_meeting_for: ?MeetingFor,
@@ -84,11 +83,10 @@ class StudentCounterService
      * @return array{
      *     website_count: int,
      *     walk_in_count: int,
-     *     folks_india_count: int,
-     *     english_coffee_count: int,
+     *     meeting_for_counts: array<string, int>,
      *     first_source: ?LeadSource,
      *     latest_source: ?LeadSource,
-     *     latest_meeting_for: ?MeetingFor,
+     *     latest_meeting_for: ?string,
      *     latest_intent: ?string,
      *     headline: string,
      *     detail: ?string
@@ -100,8 +98,12 @@ class StudentCounterService
 
         $websiteCount = $enquiries->where('lead_source', LeadSource::Website)->count();
         $walkInCount = $enquiries->where('lead_source', LeadSource::WalkIn)->count();
-        $folksIndiaCount = $enquiries->where('meeting_for', MeetingFor::FolksIndia)->count();
-        $englishCoffeeCount = $enquiries->where('meeting_for', MeetingFor::EnglishCoffee)->count();
+
+        $meetingForCounts = $enquiries
+            ->filter(fn (Enquiry $enquiry): bool => filled($enquiry->meeting_for))
+            ->groupBy(fn (Enquiry $enquiry): string => (string) $enquiry->meeting_for)
+            ->map(fn ($group): int => $group->count())
+            ->all();
 
         /** @var ?Enquiry $first */
         $first = $enquiries->first();
@@ -114,8 +116,7 @@ class StudentCounterService
         return [
             'website_count' => $websiteCount,
             'walk_in_count' => $walkInCount,
-            'folks_india_count' => $folksIndiaCount,
-            'english_coffee_count' => $englishCoffeeCount,
+            'meeting_for_counts' => $meetingForCounts,
             'first_source' => $firstSource,
             'latest_source' => $latestSource,
             'latest_meeting_for' => $latestMeetingFor,
@@ -126,8 +127,7 @@ class StudentCounterService
                 $latestSource,
                 $websiteCount,
                 $walkInCount,
-                $folksIndiaCount,
-                $englishCoffeeCount,
+                $meetingForCounts,
             ),
         ];
     }
@@ -139,7 +139,7 @@ class StudentCounterService
         }
 
         $source = $enquiry->lead_source?->label();
-        $meetingFor = $enquiry->meeting_for?->label();
+        $meetingFor = MeetingForOptions::label($enquiry->meeting_for);
 
         if ($source && $meetingFor) {
             return "{$source} for {$meetingFor}";
@@ -170,10 +170,9 @@ class StudentCounterService
         ?LeadSource $latestSource,
         int $websiteCount,
         int $walkInCount,
-        int $folksIndiaCount,
-        int $englishCoffeeCount,
+        array $meetingForCounts,
     ): ?string {
-        if ($websiteCount === 0 && $walkInCount === 0 && $folksIndiaCount === 0 && $englishCoffeeCount === 0) {
+        if ($websiteCount === 0 && $walkInCount === 0 && $meetingForCounts === []) {
             return null;
         }
 
@@ -187,12 +186,13 @@ class StudentCounterService
             $parts[] = $walkInCount === 1 ? '1 walk-in enquiry' : "{$walkInCount} walk-in enquiries";
         }
 
-        if ($folksIndiaCount > 0) {
-            $parts[] = $folksIndiaCount === 1 ? '1 for Folks India' : "{$folksIndiaCount} for Folks India";
-        }
+        foreach ($meetingForCounts as $value => $count) {
+            if ($count <= 0) {
+                continue;
+            }
 
-        if ($englishCoffeeCount > 0) {
-            $parts[] = $englishCoffeeCount === 1 ? '1 for English Coffee' : "{$englishCoffeeCount} for English Coffee";
+            $label = MeetingForOptions::label((string) $value);
+            $parts[] = $count === 1 ? "1 for {$label}" : "{$count} for {$label}";
         }
 
         $detail = implode(' · ', $parts);
@@ -251,36 +251,55 @@ class StudentCounterService
     }
 
     /**
-     * @param  array{website_count: int, walk_in_count: int}  $leadSources
+     * @param  array{website_count: int, walk_in_count: int, meeting_for_counts: array<string, int>}  $leadSources
      * @return array<int, array{label: string, value: int|float|string|null}>
      */
     protected function leadCounters(Student $student, array $leadSources): array
     {
-        return [
+        $counters = [
             ['label' => 'Visits', 'value' => $student->visits()->count()],
             ['label' => 'Enquiries', 'value' => $student->enquiries()->count()],
             ['label' => 'Website', 'value' => $leadSources['website_count']],
             ['label' => 'Walk-in', 'value' => $leadSources['walk_in_count']],
-            ['label' => 'Folks India', 'value' => $leadSources['folks_india_count']],
-            ['label' => 'English Coffee', 'value' => $leadSources['english_coffee_count']],
         ];
+
+        foreach (MeetingForOptions::active() as $option) {
+            $counters[] = [
+                'label' => $option['label'],
+                'value' => $leadSources['meeting_for_counts'][$option['value']] ?? 0,
+            ];
+        }
+
+        return $counters;
     }
 
     /**
-     * @param  array{website_count: int, walk_in_count: int}  $leadSources
+     * @param  array{website_count: int, walk_in_count: int, meeting_for_counts: array<string, int>}  $leadSources
      * @return array<int, array{label: string, value: int|float|string|null}>
      */
     protected function admissionCounters(Student $student, array $leadSources): array
     {
         $admission = $this->latestAdmission($student);
 
-        return [
+        $counters = [
             ['label' => 'Visits', 'value' => $student->visits()->count()],
             ['label' => 'Walk-in', 'value' => $leadSources['walk_in_count']],
-            ['label' => 'Folks India', 'value' => $leadSources['folks_india_count']],
-            ['label' => 'English Coffee', 'value' => $leadSources['english_coffee_count']],
-            ['label' => 'Admission', 'value' => $admission?->status?->label() ?? '—'],
         ];
+
+        foreach (MeetingForOptions::active() as $option) {
+            $count = $leadSources['meeting_for_counts'][$option['value']] ?? 0;
+
+            if ($count > 0) {
+                $counters[] = [
+                    'label' => $option['label'],
+                    'value' => $count,
+                ];
+            }
+        }
+
+        $counters[] = ['label' => 'Admission', 'value' => $admission?->status?->label() ?? '—'];
+
+        return $counters;
     }
 
     /**
@@ -336,13 +355,32 @@ class StudentCounterService
     {
         $percentage = $this->attendance->percentageForStudent($student);
 
-        return [
+        $counters = [
             ['label' => 'Batch', 'value' => $student->activeBatchStudent?->batch?->name ?? '—'],
             ['label' => 'Attendance', 'value' => $percentage !== null ? "{$percentage}%" : '—'],
-            ['label' => 'Practicals', 'value' => $this->activityAttendance->presentCountForStudent($student, ActivityKind::Practical)],
-            ['label' => 'IV', 'value' => $this->activityAttendance->presentCountForStudent($student, ActivityKind::IndustrialVisit)],
-            ['label' => 'Seminars', 'value' => $this->activityAttendance->presentCountForStudent($student, ActivityKind::Seminar)],
         ];
+
+        foreach (ActivityType::query()->enabled()->ordered()->get() as $type) {
+            if ($type->supportsScoring()) {
+                $counters[] = [
+                    'label' => $type->name,
+                    'value' => $this->activityAttendance->presentCountForStudent($student, $type),
+                ];
+
+                continue;
+            }
+
+            $summary = $this->activityAttendance->attendanceSummaryForStudent($student, $type);
+
+            $counters[] = [
+                'label' => $type->name,
+                'value' => $summary['total'] > 0
+                    ? "{$summary['present']}/{$summary['total']} present"
+                    : 0,
+            ];
+        }
+
+        return $counters;
     }
 
     protected function latestAdmission(Student $student): ?Admission

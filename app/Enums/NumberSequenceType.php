@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use App\Support\InstituteSettings;
+
 enum NumberSequenceType: string
 {
     case Enquiry = 'enquiry';
@@ -11,10 +13,12 @@ enum NumberSequenceType: string
 
     public function prefix(): string
     {
+        $base = InstituteSettings::numberPrefix();
+
         return match ($this) {
-            self::Enquiry => 'FI-ENQ',
-            self::Admission => 'FI-ADM',
-            self::Enrollment => 'FI',
+            self::Enquiry => "{$base}-ENQ",
+            self::Admission => "{$base}-ADM",
+            self::Enrollment => $base,
             self::Receipt => 'REC',
         };
     }

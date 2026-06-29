@@ -16,6 +16,36 @@ class InstituteSettings
         Cache::forget(self::CACHE_KEY);
     }
 
+    public static function brandName(): string
+    {
+        return self::forDocuments()['name'];
+    }
+
+    public static function numberPrefix(): string
+    {
+        $raw = Setting::getValue('crm.number_prefix');
+
+        if (filled($raw) && is_string($raw)) {
+            $prefix = strtoupper(preg_replace('/[^A-Z0-9]/', '', $raw));
+
+            if ($prefix !== '') {
+                return $prefix;
+            }
+        }
+
+        $fallback = (string) config('institute.number_prefix', 'CRM');
+        $prefix = strtoupper(preg_replace('/[^A-Z0-9]/', '', $fallback));
+
+        return $prefix !== '' ? $prefix : 'CRM';
+    }
+
+    public static function panelLogoUrl(): ?string
+    {
+        $path = Setting::getValue('site.logo');
+
+        return SiteImageService::url($path);
+    }
+
     /**
      * Branding used on receipts, ID cards, and CRM PDF exports.
      *
@@ -36,13 +66,13 @@ class InstituteSettings
             $g = fn (string $key, mixed $default = null) => Setting::getValue($key, $default);
 
             return [
-                'name' => (string) $g('site.name', config('folks.name')),
-                'tagline' => (string) $g('site.tagline', config('folks.tagline')),
-                'phone' => (string) $g('site.phone', config('folks.phone')),
-                'email' => (string) $g('site.email', config('folks.email')),
-                'address' => (string) $g('site.address', config('folks.address')),
+                'name' => (string) $g('site.name', config('institute.name')),
+                'tagline' => (string) $g('site.tagline', config('institute.tagline')),
+                'phone' => (string) $g('site.phone', config('institute.phone')),
+                'email' => (string) $g('site.email', config('institute.email')),
+                'address' => (string) $g('site.address', config('institute.address')),
                 'receipt_header' => (string) $g('crm.receipt_header', ''),
-                'footer' => (string) $g('crm.receipt_footer', config('folks.receipt_footer')),
+                'footer' => (string) $g('crm.receipt_footer', config('institute.receipt_footer')),
                 'logo_data_uri' => self::logoDataUri(
                     $g('crm.receipt_logo') ?: $g('site.logo'),
                 ),

@@ -17,9 +17,9 @@ class PublicEnquiryTest extends TestCase
     public function test_public_enquiry_creates_student_enquiry_and_visit(): void
     {
         $course = Course::query()->create([
-            'name' => 'Diploma in Hotel Management',
+            'name' => 'Diploma in Computer Applications',
             'code' => 'TEST-DIP',
-            'course_type' => 'diploma',
+            'programme_category' => 'coaching',
             'duration' => 6,
             'duration_type' => 'months',
             'fee' => 0,
@@ -46,19 +46,19 @@ class PublicEnquiryTest extends TestCase
         $this->assertDatabaseCount('visits', 1);
 
         $enquiry = Enquiry::query()->first();
-        $this->assertStringStartsWith('FI-ENQ-', $enquiry->enquiry_number);
+        $this->assertStringStartsWith('CRM-ENQ-', $enquiry->enquiry_number);
 
         $student = Student::query()->first();
         $this->assertSame('9876543210', $student->mobile);
         $this->assertNotNull($student->portal_password);
     }
 
-    public function test_existing_mobile_reuses_student_record(): void
+    public function test_existing_mobile_reuses_student_without_creating_second_enquiry(): void
     {
         $course = Course::query()->create([
-            'name' => 'BSc Hotel Management',
+            'name' => 'Class 12 Science',
             'code' => 'TEST-BSC',
-            'course_type' => 'bsc',
+            'programme_category' => 'school',
             'duration' => 3,
             'duration_type' => 'years',
             'fee' => 0,
@@ -74,10 +74,72 @@ class PublicEnquiryTest extends TestCase
             'course_id' => $course->id,
         ];
 
-        $this->post(route('contact.enquiry'), $payload);
-        $this->post(route('contact.enquiry'), $payload);
+        $this->post(route('contact.enquiry'), $payload)->assertRedirect(route('contact'));
+
+        $this->post(route('contact.enquiry'), $payload)
+            ->assertSessionHasErrors('mobile');
 
         $this->assertDatabaseCount('students', 1);
-        $this->assertDatabaseCount('enquiries', 2);
+        $this->assertDatabaseCount('enquiries', 1);
+    }
+
+    public function test_public_enquiry_rejects_course_hidden_from_website(): void
+    {
+        $course = Course::query()->create([
+            'name' => 'Internal Programme',
+            'code' => 'INT-001',
+            'programme_category' => 'coaching',
+            'duration' => 6,
+            'duration_type' => 'months',
+            'fee' => 10000,
+            'status' => CourseStatus::Active,
+            'show_on_website' => false,
+        ]);
+
+        $this->post(route('contact.enquiry'), [
+            'name' => 'Hidden Course Lead',
+            'father_name' => 'Parent',
+            'mobile' => '9876543211',
+            'date_of_birth' => '2000-05-15',
+            'gender' => Gender::Male->value,
+            'course_id' => $course->id,
+        ])->assertSessionHasErrors('course_id');
+
+        $this->assertDatabaseCount('students', 0);
+        $this->assertDatabaseCount('enquiries', 0);
+    }
+
+    public function test_public_enquiry_matches_student_by_alternate_mobile(): void
+    {
+        $course = Course::query()->create([
+            'name' => 'Visible Programme',
+            'code' => 'VIS-002',
+            'programme_category' => 'school',
+            'duration' => 1,
+            'duration_type' => 'years',
+            'fee' => 5000,
+            'status' => CourseStatus::Active,
+            'show_on_website' => true,
+        ]);
+
+        $existing = Student::query()->create([
+            'name' => 'Existing Student',
+            'father_name' => 'Parent',
+            'mobile' => '9111111111',
+            'alternate_mobile' => '9222222222',
+            'status' => \App\Enums\StudentStatus::Enquiry,
+        ]);
+
+        $this->post(route('contact.enquiry'), [
+            'name' => 'Existing Student',
+            'father_name' => 'Parent',
+            'mobile' => '9222222222',
+            'date_of_birth' => '2000-05-15',
+            'gender' => Gender::Male->value,
+            'course_id' => $course->id,
+        ])->assertRedirect(route('contact'));
+
+        $this->assertDatabaseCount('students', 1);
+        $this->assertSame($existing->id, Enquiry::query()->first()->student_id);
     }
 }

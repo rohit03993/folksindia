@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Verify Student — {{ config('folks.name') }}</title>
+    <title>Verify Student — {{ config('institute.name') }}</title>
     @vite(['resources/css/app.css'])
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-900 antialiased">
@@ -11,7 +11,7 @@
         <div class="w-full overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-gray-950/5">
             <div class="bg-gradient-to-r from-amber-600 to-amber-500 px-6 py-5 text-white">
                 <p class="text-xs font-semibold uppercase tracking-widest opacity-90">Student verification</p>
-                <h1 class="mt-1 text-xl font-bold">{{ config('folks.name') }}</h1>
+                <h1 class="mt-1 text-xl font-bold">{{ config('institute.name') }}</h1>
             </div>
 
             <div class="space-y-4 px-6 py-6">
@@ -25,7 +25,7 @@
                         <dd class="mt-0.5 font-semibold text-gray-950">{{ $student->name }}</dd>
                     </div>
                     <div>
-                        <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">Enrollment number</dt>
+                        <dt class="text-xs font-semibold uppercase tracking-wide text-gray-500">{{ \App\Support\StudentLabels::rollNumberLabel() }}</dt>
                         <dd class="mt-0.5 font-mono font-semibold text-amber-700">{{ $enrollment->enrollment_number }}</dd>
                     </div>
                     <div>
@@ -39,7 +39,7 @@
                 </dl>
 
                 <p class="text-xs text-gray-500">
-                    This page confirms the QR code on a Folks India student ID card matches our records.
+                    This page confirms the QR code on a student ID card matches our records.
                 </p>
             </div>
         </div>

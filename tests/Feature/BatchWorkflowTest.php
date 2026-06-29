@@ -86,10 +86,10 @@ class BatchWorkflowTest extends TestCase
 
     protected function createStaffUser(): User
     {
-        Role::query()->firstOrCreate(['name' => RoleName::Staff->value, 'guard_name' => 'web']);
+        Role::query()->firstOrCreate(['name' => RoleName::SuperAdmin->value, 'guard_name' => 'web']);
 
         $user = User::factory()->create(['is_active' => true]);
-        $user->assignRole(RoleName::Staff->value);
+        $user->assignRole(RoleName::SuperAdmin->value);
 
         return $user;
     }
@@ -111,7 +111,7 @@ class BatchWorkflowTest extends TestCase
         $course = Course::query()->create([
             'name' => 'Diploma Batch',
             'code' => 'DIP-BAT',
-            'course_type' => 'diploma',
+            'programme_category' => 'coaching',
             'duration' => 6,
             'duration_type' => 'months',
             'fee' => 50000,

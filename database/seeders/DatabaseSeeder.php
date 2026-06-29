@@ -6,13 +6,17 @@ use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
+    /**
+     * Wipe and reseed everything: php artisan migrate:fresh --seed
+     */
     public function run(): void
     {
         $this->call([
-            RoleSeeder::class,
-            AdminUserSeeder::class,
-            CourseSeeder::class,
-            SiteContentSeeder::class,
+            DemoBaselineSeeder::class,
         ]);
+
+        if (config('institute.seed_demo_data', false)) {
+            $this->call(DemoDataSeeder::class);
+        }
     }
 }

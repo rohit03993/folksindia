@@ -36,7 +36,7 @@ class StudentCounterServiceTest extends TestCase
 
         $labels = collect($profile['items'])->pluck('label')->all();
 
-        $this->assertSame(['Visits', 'Enquiries', 'Website', 'Walk-in', 'Folks India', 'English Coffee'], $labels);
+        $this->assertSame(['Visits', 'Enquiries', 'Website', 'Walk-in', 'Enquiry', 'Admission', 'Marketing', 'Fees', 'General'], $labels);
         $this->assertNotContains('Attendance', $labels);
         $this->assertNotContains('Paid', $labels);
     }
@@ -55,7 +55,7 @@ class StudentCounterServiceTest extends TestCase
         $course = Course::query()->create([
             'name' => 'Diploma',
             'code' => 'DIP-SRC',
-            'course_type' => 'diploma',
+            'programme_category' => 'coaching',
             'duration' => 6,
             'duration_type' => 'months',
             'fee' => 0,
@@ -64,35 +64,22 @@ class StudentCounterServiceTest extends TestCase
 
         Enquiry::query()->create([
             'student_id' => $student->id,
-            'enquiry_number' => 'FI-ENQ-2026-000101',
-            'course_id' => $course->id,
-            'lead_source' => LeadSource::Website,
-            'meeting_for' => MeetingFor::FolksIndia,
-            'visit_type' => 'first_visit',
-            'latest_visit_status' => 'interested',
-            'created_at' => now()->subDay(),
-        ]);
-
-        Enquiry::query()->create([
-            'student_id' => $student->id,
-            'enquiry_number' => 'FI-ENQ-2026-000102',
+            'enquiry_number' => 'CRM-ENQ-2026-000101',
             'course_id' => $course->id,
             'lead_source' => LeadSource::WalkIn,
-            'meeting_for' => MeetingFor::EnglishCoffee,
-            'visit_type' => 'follow_up',
+            'meeting_for' => MeetingFor::Marketing,
+            'visit_type' => 'first_visit',
             'latest_visit_status' => 'interested',
             'created_at' => now(),
         ]);
 
         $profile = app(StudentCounterService::class)->profile($student->fresh());
 
-        $this->assertSame(1, $profile['lead_sources']['website_count']);
+        $this->assertSame(0, $profile['lead_sources']['website_count']);
         $this->assertSame(1, $profile['lead_sources']['walk_in_count']);
-        $this->assertSame(1, $profile['lead_sources']['folks_india_count']);
-        $this->assertSame(1, $profile['lead_sources']['english_coffee_count']);
-        $this->assertSame('Website + Walk-in lead', $profile['lead_sources']['headline']);
-        $this->assertSame('Walk-in for English Coffee', $profile['lead_sources']['latest_intent']);
-        $this->assertStringContainsString('First Website', $profile['lead_sources']['detail']);
+        $this->assertSame(1, $profile['lead_sources']['meeting_for_counts']['marketing'] ?? 0);
+        $this->assertSame('Walk-in lead', $profile['lead_sources']['headline']);
+        $this->assertSame('Walk-in for Marketing', $profile['lead_sources']['latest_intent']);
     }
 
     public function test_admission_in_progress_uses_admission_counters(): void

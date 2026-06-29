@@ -37,12 +37,10 @@
                 @if ($photo && $photo->isImage())
                     <button
                         type="button"
-                        class="block w-full cursor-zoom-in"
+                        class="js-media-preview-trigger block w-full cursor-zoom-in"
                         data-preview-url="{{ $photo->previewUrl() }}"
                         data-preview-title="Student photo"
                         data-preview-pdf="0"
-                        x-data
-                        x-on:click="$dispatch('open-media-preview', { url: $el.dataset.previewUrl, title: $el.dataset.previewTitle, isPdf: false })"
                     >
                         <img
                             src="{{ $photo->previewUrl() }}"
@@ -119,7 +117,7 @@
     @if ($admission->enrollment)
         <div class="border-b border-gray-100 px-4 py-3 dark:border-white/10 sm:px-6">
             <p class="text-sm font-semibold text-success-600 dark:text-success-400">
-                Enrolled: <span class="font-mono">{{ $admission->enrollment->enrollment_number }}</span>
+                Enrolled · {{ \App\Support\StudentLabels::rollNumberLabel() }}: <span class="font-mono">{{ $admission->enrollment->enrollment_number }}</span>
             </p>
         </div>
     @endif

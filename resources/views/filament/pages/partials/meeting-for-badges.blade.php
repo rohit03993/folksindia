@@ -1,28 +1,20 @@
 @php
-    $folksIndiaCount = $leadSources['folks_india_count'] ?? 0;
-    $englishCoffeeCount = $leadSources['english_coffee_count'] ?? 0;
+    use App\Support\MeetingForOptions;
+
+    $counts = array_filter($leadSources['meeting_for_counts'] ?? [], fn (int $count): bool => $count > 0);
 @endphp
 
-@if ($folksIndiaCount > 0 || $englishCoffeeCount > 0)
+@if ($counts !== [])
     <div class="flex flex-wrap items-center gap-2">
-        @if ($folksIndiaCount > 0)
+        @foreach ($counts as $value => $count)
             @include('filament.pages.partials.meeting-for-badge', [
-                'meetingFor' => \App\Enums\MeetingFor::FolksIndia,
+                'value' => (string) $value,
                 'size' => 'md',
             ])
-            @if ($folksIndiaCount > 1)
-                <span class="text-xs font-bold text-amber-700 dark:text-amber-400">×{{ $folksIndiaCount }}</span>
+            @if ($count > 1)
+                @php($style = MeetingForOptions::badgeStyle((string) $value))
+                <span @class(['text-xs font-bold', $style['text']])>×{{ $count }}</span>
             @endif
-        @endif
-
-        @if ($englishCoffeeCount > 0)
-            @include('filament.pages.partials.meeting-for-badge', [
-                'meetingFor' => \App\Enums\MeetingFor::EnglishCoffee,
-                'size' => 'md',
-            ])
-            @if ($englishCoffeeCount > 1)
-                <span class="text-xs font-bold text-violet-700 dark:text-violet-400">×{{ $englishCoffeeCount }}</span>
-            @endif
-        @endif
+        @endforeach
     </div>
 @endif
