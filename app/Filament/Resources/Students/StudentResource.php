@@ -12,6 +12,7 @@ use App\Filament\Support\CrmTable;
 use App\Models\AcademicSession;
 use App\Models\Course;
 use App\Models\Student;
+use App\Services\FeesDashboardService;
 use App\Support\CrmNavigation;
 use App\Support\InstituteProfile;
 use Filament\Actions\Action;
@@ -56,6 +57,7 @@ class StudentResource extends Resource
             ->with([
                 'activeEnrollment.course',
                 'activeEnrollment.academicSession',
+                'activeEnrollment.feeStructure.installments',
                 'activeBatchStudent.batch',
             ]);
     }
@@ -93,10 +95,36 @@ class StudentResource extends Resource
                     ->placeholder('—')
                     ->limit(30)
                     ->toggleable(),
+                TextColumn::make('activeEnrollment.feeStructure.pending_amount')
+                    ->label('Fee pending')
+                    ->money('INR')
+                    ->placeholder('—')
+                    ->sortable()
+                    ->color(fn ($state): string => (float) ($state ?? 0) > 0 ? 'warning' : 'success'),
+                TextColumn::make('fee_next_due')
+                    ->label('Next due')
+                    ->state(function (Student $record): ?string {
+                        $date = app(FeesDashboardService::class)->nextDueDateForStudent($record);
+
+                        return $date?->format('d M Y');
+                    })
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('fee_status')
+                    ->label('Fee status')
+                    ->badge()
+                    ->state(function (Student $record): ?string {
+                        return app(FeesDashboardService::class)->feeStatusForStudent($record)['label'] ?? null;
+                    })
+                    ->color(function (Student $record): string {
+                        return app(FeesDashboardService::class)->feeStatusForStudent($record)['color'] ?? 'gray';
+                    })
+                    ->placeholder('—')
+                    ->toggleable(),
                 TextColumn::make('activeEnrollment.academicSession.name')
                     ->label('Session')
                     ->placeholder('—')
-                    ->toggleable(),
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('activeBatchStudent.batch.name')
                     ->label('Batch')
                     ->placeholder('—')
@@ -143,6 +171,48 @@ class StudentResource extends Resource
                             fn (Builder $query): Builder => $query->where('course_id', $data['value']),
                         ),
                     )),
+                SelectFilter::make('fee_status')
+                    ->label('Fee status')
+                    ->options([
+                        'overdue' => 'Overdue',
+                        'pending' => 'Pending (not overdue)',
+                        'paid' => 'Fully paid',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $value = $data['value'] ?? null;
+
+                        if (! filled($value)) {
+                            return $query;
+                        }
+
+                        return match ($value) {
+                            'paid' => $query->whereHas(
+                                'activeEnrollment.feeStructure',
+                                fn (Builder $feeQuery): Builder => $feeQuery
+                                    ->where('pending_amount', '<=', 0)
+                                    ->whereDoesntHave('penalties', fn (Builder $penaltyQuery): Builder => $penaltyQuery
+                                        ->where('status', \App\Enums\FeePenaltyStatus::Pending)),
+                            ),
+                            'overdue' => $query->whereHas(
+                                'activeEnrollment.feeStructure.installments',
+                                fn (Builder $installmentQuery): Builder => $installmentQuery
+                                    ->where('pending_amount', '>', 0)
+                                    ->whereNotNull('due_date')
+                                    ->whereDate('due_date', '<', now()->toDateString()),
+                            ),
+                            'pending' => $query->whereHas(
+                                'activeEnrollment.feeStructure',
+                                fn (Builder $feeQuery): Builder => $feeQuery->where('pending_amount', '>', 0),
+                            )->whereDoesntHave(
+                                'activeEnrollment.feeStructure.installments',
+                                fn (Builder $installmentQuery): Builder => $installmentQuery
+                                    ->where('pending_amount', '>', 0)
+                                    ->whereNotNull('due_date')
+                                    ->whereDate('due_date', '<', now()->toDateString()),
+                            ),
+                            default => $query,
+                        };
+                    }),
                 SelectFilter::make('academic_session')
                     ->label('Session')
                     ->options(fn (): array => AcademicSession::query()

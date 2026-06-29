@@ -35,10 +35,13 @@ class DashboardController extends Controller
         $enrollment = $student->activeEnrollment;
         $fees = $enrollment?->feeStructure;
 
+        $enrollment?->feeStructure?->loadMissing(['installments', 'miscCharges']);
+
         $payments = $fees
             ? Payment::query()
                 ->where('student_id', $student->id)
                 ->where('fee_structure_id', $fees->id)
+                ->with('feeInstallment')
                 ->orderByDesc('payment_date')
                 ->orderByDesc('id')
                 ->get()
@@ -89,6 +92,8 @@ class DashboardController extends Controller
             'canFillForm' => $admission?->isEditable() ?? false,
             'enrollment' => $enrollment,
             'fees' => $fees,
+            'installments' => $fees?->installments ?? collect(),
+            'miscCharges' => $fees?->miscCharges ?? collect(),
             'payments' => $payments,
             'examMarksSections' => $examMarksSections,
             'publishedResults' => $publishedResults,

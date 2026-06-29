@@ -8,6 +8,7 @@ use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use App\Filament\Pages\BulkActivityMarksImportPage;
 use App\Filament\Pages\Dashboard;
+use App\Filament\Pages\FeesDashboardPage;
 use App\Filament\Pages\MyAccountPage;
 use App\Filament\Pages\TestMarksReviewPage;
 use App\Support\InstituteSettings;
@@ -63,6 +64,7 @@ class RohitPanelProvider extends PanelProvider
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
             ->pages([
                 Dashboard::class,
+                FeesDashboardPage::class,
                 BulkActivityMarksImportPage::class,
                 TestMarksReviewPage::class,
                 MyAccountPage::class,

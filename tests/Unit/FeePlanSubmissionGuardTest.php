@@ -20,7 +20,9 @@ class FeePlanSubmissionGuardTest extends TestCase
         $feeStructure = new FeeStructure([
             'course_fee' => 100000,
             'discount_amount' => 0,
+            'net_fee' => 100000,
             'paid_amount' => 0,
+            'pending_amount' => 100000,
         ]);
         $feeStructure->setRelation('miscCharges', collect());
 

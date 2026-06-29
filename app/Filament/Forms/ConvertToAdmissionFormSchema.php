@@ -88,6 +88,7 @@ class ConvertToAdmissionFormSchema
             ->helperText('Each option shows duration and fee from Courses master.')
             ->afterStateUpdated(function (mixed $state, callable $set, Get $get): void {
                 self::syncFeeDisplays($set, $state, $get('discount_amount'), $get('misc_fees'));
+                AdmissionFeePlanFormSchema::applyCourseTemplateIfNeeded($set, $get);
             });
 
         $fields[] = TextInput::make('course_fee_display')

@@ -166,6 +166,11 @@ class StudentProfilePage extends Page
      */
     public Collection $installments;
 
+    /**
+     * @var Collection<int, \App\Models\FeeStructureHistory>
+     */
+    public Collection $feeStructureHistory;
+
     public ?Admission $activeAdmission = null;
 
     public ?string $tenthBoard = null;
@@ -239,6 +244,7 @@ class StudentProfilePage extends Page
         $this->payments = new Collection;
         $this->installments = new Collection;
         $this->penalties = new Collection;
+        $this->feeStructureHistory = new Collection;
         $this->attendanceRecords = new Collection;
         $this->activityRecords = [];
 
@@ -533,7 +539,7 @@ class StudentProfilePage extends Page
     public function removeInstallmentRow(int $index): void
     {
         unset($this->installmentPlan[$index]);
-        $this->installmentPlan = FeePlanCalculator::sortAndRenumberInstallmentPlan(
+        $this->installmentPlan = FeePlanCalculator::sortInstallmentPlanByDueDate(
             array_values($this->installmentPlan),
         );
     }
@@ -562,6 +568,19 @@ class StudentProfilePage extends Page
         $discount = max(0, (float) ($this->discountAmount ?? 0));
         $miscTotal = FeePlanCalculator::sumAmounts($this->miscFees);
         $netFee = max(0, $courseFee - $discount + $miscTotal);
+        $course = $this->activeAdmission?->enquiry?->course;
+
+        if ($course) {
+            $course->loadMissing('installmentTemplates');
+            $templatePlan = FeePlanCalculator::planFromCourseTemplates($course, $netFee);
+
+            if ($templatePlan !== []) {
+                $this->installmentPlan = $templatePlan;
+                $this->useInstallmentPlan = true;
+
+                return;
+            }
+        }
 
         $this->installmentPlan = FeePlanCalculator::defaultTwoPartPlan($netFee);
         $this->useInstallmentPlan = true;
@@ -595,6 +614,19 @@ class StudentProfilePage extends Page
         $netFee = max(0, $courseFee - $discount + $miscTotal);
 
         if ($this->installmentPlan === [] && $netFee > 0) {
+            $course = $this->activeAdmission?->enquiry?->course;
+
+            if ($course) {
+                $course->loadMissing('installmentTemplates');
+                $templatePlan = FeePlanCalculator::planFromCourseTemplates($course, $netFee);
+
+                if ($templatePlan !== []) {
+                    $this->installmentPlan = $templatePlan;
+
+                    return;
+                }
+            }
+
             $this->installmentPlan = [FeePlanCalculator::singleFullFeeRow($netFee)];
         }
     }
@@ -743,17 +775,15 @@ class StudentProfilePage extends Page
             'activeEnrollment.feeStructure.discountSetBy',
             'activeEnrollment.feeStructure.discountEntries.grantedBy',
             'activeEnrollment.feeStructure.setBy',
+            'activeEnrollment.feeStructure.history.changedBy',
         ]);
         $feeStructure = $this->record->activeEnrollment?->feeStructure;
 
-        if ($feeStructure) {
-            app(FeeInstallmentService::class)->syncInstallmentOrderAndLabels($feeStructure);
-            $feeStructure->unsetRelation('installments');
-            $feeStructure->load('installments');
-        }
-
         $this->installments = $feeStructure?->installments ?? new Collection;
         $this->penalties = $feeStructure?->penalties ?? new Collection;
+        $this->feeStructureHistory = $feeStructure
+            ? $feeStructure->history()->with('changedBy')->orderByDesc('changed_at')->limit(20)->get()
+            : new Collection;
         $this->loadPayments();
     }
 
@@ -1390,7 +1420,7 @@ class StudentProfilePage extends Page
                 })
                 ->visible(fn (): bool => $this->userCan(CrmPermission::FeesCollect)
                     && $this->record->activeEnrollment?->feeStructure !== null
-                    && (float) ($this->record->activeEnrollment->feeStructure->pending_amount ?? 0) > 0),
+                    && (float) ($this->record->activeEnrollment->feeStructure->totalCollectiblePending() ?? 0) > 0),
             Action::make('adjustFees')
                 ->label('Adjust Fees')
                 ->icon('heroicon-o-calculator')
@@ -1736,7 +1766,9 @@ class StudentProfilePage extends Page
                                     'payments' => $this->payments,
                                     'installments' => $this->installments,
                                     'penalties' => $this->penalties,
+                                    'feeStructureHistory' => $this->feeStructureHistory,
                                     'canCollectFees' => $this->userCan(CrmPermission::FeesCollect),
+                                    'canWaivePenalty' => $this->userCan(CrmPermission::FeesWaivePenalty),
                                 ]),
                         ]),
                     'receipts' => Tab::make('Receipts')

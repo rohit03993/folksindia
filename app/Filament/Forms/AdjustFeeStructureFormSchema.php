@@ -7,6 +7,7 @@ use App\Support\FeePlanCalculator;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -28,9 +29,13 @@ class AdjustFeeStructureFormSchema
         $miscTotal = $feeStructure->miscChargesTotal();
         $currentNet = round((float) $feeStructure->net_fee, 2);
         $currentDiscount = round((float) $feeStructure->discount_amount, 2);
-        $maxAdditionalDiscount = round(max(0, $currentNet - $paid), 2);
 
         $rebalanceInstallments = function (Get $get, Set $set) use ($feeStructure, $miscTotal): void {
+            if ((float) ($get('discount_adjustment') ?? $get('additional_discount') ?? 0) != 0.0
+                || round((float) ($get('course_fee') ?? $feeStructure->course_fee), 2) !== round((float) $feeStructure->course_fee, 2)) {
+                $set('reschedule_installments', true);
+            }
+
             if (! (bool) $get('reschedule_installments')) {
                 return;
             }
@@ -72,31 +77,51 @@ class AdjustFeeStructureFormSchema
                 ->label('Balance still due now')
                 ->content('₹'.number_format($pending, 2))
                 ->columnSpanFull(),
-            Hidden::make('course_fee')
-                ->default($feeStructure->course_fee),
-            TextInput::make('additional_discount')
-                ->label('Give more discount now')
+            TextInput::make('course_fee')
+                ->label('Course fee')
                 ->numeric()
                 ->prefix('₹')
-                ->default(0)
+                ->default($feeStructure->course_fee)
                 ->minValue(0)
-                ->maxValue($maxAdditionalDiscount)
                 ->step(0.01)
-                ->helperText(
-                    $maxAdditionalDiscount > 0
-                        ? 'Enter extra discount from the current net (max ₹'.number_format($maxAdditionalDiscount, 2).' so net does not fall below paid).'
-                        : 'Net fee already equals paid amount — no further discount possible.'
-                )
                 ->live(debounce: 300)
                 ->afterStateUpdated($rebalanceInstallments)
-                ->disabled($maxAdditionalDiscount <= 0),
+                ->helperText('Increase or decrease the listed course fee. Misc charges stay as agreed at admission.')
+                ->columnSpanFull(),
+            Select::make('discount_mode')
+                ->label('Discount change type')
+                ->options([
+                    'amount' => 'Fixed amount (₹)',
+                    'percent' => 'Percentage of course fee (%)',
+                ])
+                ->default('amount')
+                ->live()
+                ->native(false),
+            TextInput::make('discount_adjustment')
+                ->label(fn (Get $get): string => ($get('discount_mode') ?? 'amount') === 'percent'
+                    ? 'Additional discount (%)'
+                    : 'Discount adjustment (₹)')
+                ->numeric()
+                ->default(0)
+                ->step(0.01)
+                ->helperText(fn (Get $get): string => ($get('discount_mode') ?? 'amount') === 'percent'
+                    ? 'Enter % off the course fee. Applied on top of existing discount.'
+                    : 'Positive = more discount. Negative = reduce discount. Net fee cannot fall below paid amount.')
+                ->live(debounce: 300)
+                ->afterStateUpdated($rebalanceInstallments),
+            Hidden::make('additional_discount')
+                ->default(0)
+                ->dehydrated(false),
             Placeholder::make('new_net_fee_preview')
                 ->label('After this change')
-                ->content(function (Get $get) use ($feeStructure, $miscTotal, $currentNet, $currentDiscount, $paid): string {
-                    $additional = max(0, (float) ($get('additional_discount') ?? 0));
+                ->content(function (Get $get) use ($feeStructure, $miscTotal, $currentNet, $paid): string {
                     $newNet = self::previewNet($feeStructure, $get, $miscTotal);
                     $newPending = round(max(0, $newNet - $paid), 2);
-                    $newTotalDiscount = round($currentDiscount + $additional, 2);
+                    $newTotalDiscount = self::resolveDiscountAmount($feeStructure, [
+                        'course_fee' => $get('course_fee'),
+                        'discount_mode' => $get('discount_mode'),
+                        'discount_adjustment' => $get('discount_adjustment'),
+                    ]);
 
                     return 'New net ₹'.number_format($newNet, 2)
                         .' (was ₹'.number_format($currentNet, 2).')'
@@ -104,6 +129,18 @@ class AdjustFeeStructureFormSchema
                         .' · New balance ₹'.number_format($newPending, 2)
                         .' · Total discount ₹'.number_format($newTotalDiscount, 2);
                 })
+                ->columnSpanFull(),
+            Placeholder::make('reschedule_required_warning')
+                ->label('')
+                ->content('The balance due is changing — reschedule remaining installments is turned on so installment rows match the new amount.')
+                ->visible(function (Get $get) use ($feeStructure, $miscTotal, $currentNet, $paid): bool {
+                    $newNet = self::previewNet($feeStructure, $get, $miscTotal);
+
+                    return round(max(0, $newNet - $paid), 2) > 0
+                        && abs($newNet - $currentNet) > 0.01
+                        && (bool) $get('reschedule_installments');
+                })
+                ->extraAttributes(['class' => 'text-sm font-medium text-amber-700 dark:text-amber-300'])
                 ->columnSpanFull(),
             Textarea::make('reason')
                 ->label('Reason for change')
@@ -208,6 +245,8 @@ class AdjustFeeStructureFormSchema
 
         return [
             'course_fee' => $feeStructure->course_fee,
+            'discount_mode' => 'amount',
+            'discount_adjustment' => 0,
             'additional_discount' => 0,
             'reschedule_installments' => (float) $feeStructure->pending_amount > 0,
             'installment_plan' => self::pendingInstallmentPlan($feeStructure),
@@ -237,10 +276,20 @@ class AdjustFeeStructureFormSchema
      */
     public static function resolveDiscountAmount(FeeStructure $feeStructure, array $data): float
     {
-        if (array_key_exists('additional_discount', $data)) {
-            $additional = max(0, (float) ($data['additional_discount'] ?? 0));
+        $courseFee = round((float) ($data['course_fee'] ?? $feeStructure->course_fee), 2);
 
-            return round((float) $feeStructure->discount_amount + $additional, 2);
+        if (array_key_exists('discount_adjustment', $data) || array_key_exists('additional_discount', $data)) {
+            $mode = (string) ($data['discount_mode'] ?? 'amount');
+            $adjustment = (float) ($data['discount_adjustment'] ?? $data['additional_discount'] ?? 0);
+
+            if ($mode === 'percent') {
+                $adjustment = max(0, $adjustment);
+                $delta = round($courseFee * $adjustment / 100, 2);
+            } else {
+                $delta = $adjustment;
+            }
+
+            return round(max(0, min((float) $feeStructure->discount_amount + $delta, $courseFee)), 2);
         }
 
         return round(max(0, (float) ($data['discount_amount'] ?? $feeStructure->discount_amount)), 2);
@@ -345,15 +394,8 @@ class AdjustFeeStructureFormSchema
      */
     public static function previewNetFromMounted(FeeStructure $feeStructure, array $mounted, float $miscTotal): float
     {
-        if (array_key_exists('additional_discount', $mounted)) {
-            $currentNet = round((float) $feeStructure->net_fee, 2);
-            $additional = max(0, (float) ($mounted['additional_discount'] ?? 0));
-
-            return round(max(0, $currentNet - $additional), 2);
-        }
-
         $courseFee = max(0, (float) ($mounted['course_fee'] ?? $feeStructure->course_fee));
-        $discount = max(0, (float) ($mounted['discount_amount'] ?? $feeStructure->discount_amount));
+        $discount = self::resolveDiscountAmount($feeStructure, $mounted);
 
         return round($courseFee - $discount + $miscTotal, 2);
     }
