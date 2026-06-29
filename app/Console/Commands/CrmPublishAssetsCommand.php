@@ -26,8 +26,13 @@ class CrmPublishAssetsCommand extends Command
             return self::FAILURE;
         }
 
+        if (! file_exists(public_path('build/manifest.json'))) {
+            $this->components->warn('public/build/manifest.json is missing.');
+            $this->line('The public website and student portal need: npm ci && npm run build');
+            $this->line('Without it, pages may load unstyled (or 500 on older code). Filament /admin still works.');
+        }
+
         $this->components->success('Static assets published to public/vendor/livewire and public/js/filament.');
-        $this->line('If CSS is missing, also run: npm run build');
 
         return self::SUCCESS;
     }
