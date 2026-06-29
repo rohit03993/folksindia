@@ -31,6 +31,7 @@ class CrmHint
         'staff.list' => 'Create logins with one or more job roles (Counsellor, Accountant, etc.). Permissions combine — tick all four for full operations access.',
         'staff.create' => 'Set mobile, password, and tick every role this person needs. You can assign 1, 2, 3, or all job roles on one account.',
         'staff.edit' => 'Add or remove job roles anytime. Super Admin is separate — full institute control.',
+        'account.my' => 'Update your own mobile and password for /admin login. Mobile must not already belong to another staff account.',
         'admissions.list' => 'Oversight list for admission forms. Staff submit documents here; only Super Admin can approve and create the roll number.',
         'whatsapp.campaigns' => 'Send template messages to a batch or whole course. Student name and roll number fill in automatically per recipient.',
         'import.bulk' => 'For migrating old student data only — not for day-to-day admissions. Creates enrolled students in one step and skips the normal enquiry → call → admission flow. Use Convert to Admission for new students.',
