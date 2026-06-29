@@ -114,6 +114,10 @@ class ActivitySessionResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
+        if (! \Illuminate\Support\Facades\Schema::hasTable((new ActivitySession)->getTable())) {
+            return ActivitySession::query()->whereRaw('0 = 1');
+        }
+
         return parent::getEloquentQuery()->with('activityType')->withCount([
             'activityAttendances as present_count' => fn ($query) => $query->where('is_present', true),
         ]);

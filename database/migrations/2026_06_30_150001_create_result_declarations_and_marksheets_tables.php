@@ -9,7 +9,20 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('result_declarations', function (Blueprint $table) {
+        if (! Schema::hasTable('activity_types')) {
+            throw new \RuntimeException(
+                'The activity_types table is missing. Run: php artisan crm:repair-schema --force',
+            );
+        }
+
+        if (Schema::hasTable('result_declarations')
+            && Schema::hasTable('student_marksheets')
+            && Schema::hasTable('marksheet_serial_sequences')) {
+            return;
+        }
+
+        if (! Schema::hasTable('result_declarations')) {
+            Schema::create('result_declarations', function (Blueprint $table) {
             $table->id();
             $table->string('group_key')->unique();
             $table->string('test_name');
@@ -28,16 +41,20 @@ return new class extends Migration
 
             $table->index(['batch_id', 'session_date']);
             $table->index('status');
-        });
+            });
+        }
 
-        Schema::create('marksheet_serial_sequences', function (Blueprint $table) {
-            $table->unsignedTinyInteger('id')->primary();
-            $table->unsignedInteger('last_value')->default(0);
-        });
+        if (! Schema::hasTable('marksheet_serial_sequences')) {
+            Schema::create('marksheet_serial_sequences', function (Blueprint $table) {
+                $table->unsignedTinyInteger('id')->primary();
+                $table->unsignedInteger('last_value')->default(0);
+            });
 
-        DB::table('marksheet_serial_sequences')->insert(['id' => 1, 'last_value' => 0]);
+            DB::table('marksheet_serial_sequences')->insert(['id' => 1, 'last_value' => 0]);
+        }
 
-        Schema::create('student_marksheets', function (Blueprint $table) {
+        if (! Schema::hasTable('student_marksheets')) {
+            Schema::create('student_marksheets', function (Blueprint $table) {
             $table->id();
             $table->foreignId('result_declaration_id')->constrained()->cascadeOnDelete();
             $table->foreignId('student_id')->constrained()->restrictOnDelete();
@@ -51,7 +68,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['result_declaration_id', 'student_id']);
-        });
+            });
+        }
     }
 
     public function down(): void

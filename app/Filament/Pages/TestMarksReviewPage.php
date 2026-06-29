@@ -152,6 +152,15 @@ class TestMarksReviewPage extends Page
                 ->body(collect($exception->errors())->flatten()->first())
                 ->danger()
                 ->send();
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            Notification::make()
+                ->title('Could not issue marksheets')
+                ->body($exception->getMessage())
+                ->danger()
+                ->duration(15000)
+                ->send();
         }
     }
 

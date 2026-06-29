@@ -7,6 +7,7 @@ use App\Models\ActivityAttendance;
 use App\Models\ActivitySession;
 use App\Models\ResultDeclaration;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class PublishedResultsGate
 {
@@ -15,6 +16,10 @@ class PublishedResultsGate
      */
     public static function statusesByGroupKey(): array
     {
+        if (! Schema::hasTable('result_declarations')) {
+            return [];
+        }
+
         return ResultDeclaration::query()
             ->get(['group_key', 'status', 'declared_at'])
             ->filter(fn (ResultDeclaration $row): bool => $row->isPublished())
@@ -26,6 +31,10 @@ class PublishedResultsGate
 
     public static function isPublishedGroupKey(string $groupKey): bool
     {
+        if (! Schema::hasTable('result_declarations')) {
+            return false;
+        }
+
         return ResultDeclaration::query()
             ->where('group_key', $groupKey)
             ->where('status', ResultDeclarationStatus::Published)

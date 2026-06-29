@@ -14,6 +14,7 @@ use App\Support\ExamTestGroupMatrix;
 use App\Support\MarksheetDivision;
 use App\Support\StudentExamMarksMatrix;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class ResultDeclarationService
@@ -237,6 +238,14 @@ class ResultDeclarationService
      */
     public static function statusMetaForGroupKey(string $groupKey): array
     {
+        if (! Schema::hasTable('result_declarations')) {
+            return [
+                'status' => 'none',
+                'label' => 'Not published',
+                'color' => 'gray',
+            ];
+        }
+
         $declaration = ResultDeclaration::query()->where('group_key', $groupKey)->first();
 
         if (! $declaration) {

@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\ActivitySession;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Schema;
 
 class ExamTestGroupMatrix
 {
@@ -30,6 +31,10 @@ class ExamTestGroupMatrix
      */
     public static function build(?int $batchId = null, ?int $activityTypeId = null): array
     {
+        if (! Schema::hasTable('activity_sessions')) {
+            return ['subjects' => [], 'rows' => []];
+        }
+
         $query = ActivitySession::query()
             ->with(['activityType', 'batch'])
             ->withCount([
@@ -185,7 +190,7 @@ class ExamTestGroupMatrix
                 if (! isset($studentRows[$studentId])) {
                     $studentRows[$studentId] = [
                         'student_id' => $studentId,
-                        'roll_number' => (string) ($student->activeEnrollment?->enrollment_number ?? 'ó'),
+                        'roll_number' => (string) ($student->activeEnrollment?->enrollment_number ?? 'ù'),
                         'student_name' => (string) $student->name,
                         'scores' => [],
                     ];
@@ -211,7 +216,7 @@ class ExamTestGroupMatrix
             ->values()
             ->map(function (array $row) use ($subjectList): array {
                 foreach ($subjectList as $subject) {
-                    $row['scores'][$subject] = $row['scores'][$subject] ?? 'ó';
+                    $row['scores'][$subject] = $row['scores'][$subject] ?? 'ù';
                 }
 
                 return $row;
