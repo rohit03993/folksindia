@@ -108,14 +108,31 @@ class SiteContentService
             if ($repaired !== $path) {
                 Setting::setValue($settingKey, $repaired, 'images');
                 $fixed++;
+                continue;
+            }
+
+            $resolved = SiteImageService::resolveExistingPath($path);
+
+            if ($resolved && $resolved !== $path) {
+                Setting::setValue($settingKey, $resolved, 'images');
+                $fixed++;
             }
         }
 
         foreach (SiteGalleryItem::query()->get() as $item) {
-            $repaired = $this->replaceBrokenRemoteUrl($item->image_path);
+            $path = $item->image_path;
+            $repaired = $this->replaceBrokenRemoteUrl($path);
 
-            if ($repaired !== $item->image_path) {
+            if ($repaired !== $path) {
                 $item->update(['image_path' => $repaired]);
+                $fixed++;
+                continue;
+            }
+
+            $resolved = SiteImageService::resolveExistingPath($path);
+
+            if ($resolved && $resolved !== $path) {
+                $item->update(['image_path' => $resolved]);
                 $fixed++;
             }
         }
