@@ -4,7 +4,9 @@ namespace App\Filament\Pages;
 
 use App\Enums\BatchStatus;
 use App\Enums\CrmPermission;
+use App\Enums\LicenseFeature;
 use App\Support\CrmAccess;
+use App\Support\FeatureGate;
 use App\Exports\ActivityMarksImportTemplateExport;
 use App\Filament\Resources\ActivitySessions\ActivitySessionResource;
 use App\Filament\Resources\WhatsAppCampaigns\WhatsAppCampaignResource;
@@ -159,6 +161,10 @@ class BulkActivityMarksImportPage extends Page
 
     public static function canAccess(): bool
     {
+        if (! FeatureGate::enabled(LicenseFeature::Marks)) {
+            return false;
+        }
+
         return CrmAccess::can(Auth::user(), CrmPermission::MarksImport);
     }
 
@@ -320,6 +326,15 @@ class BulkActivityMarksImportPage extends Page
 
     public function queueWhatsAppCampaign(ActivityMarksWhatsAppService $marksWhatsApp): void
     {
+        if (! FeatureGate::enabled(LicenseFeature::WhatsApp)) {
+            Notification::make()
+                ->title('WhatsApp module is not enabled')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
         $this->validate([
             'whatsappTemplateId' => 'required|exists:whatsapp_templates,id',
         ]);

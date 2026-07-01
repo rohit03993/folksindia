@@ -16,11 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'student.portal' => \App\Http\Middleware\EnsureStudentPortalAuth::class,
+            'license.feature' => \App\Http\Middleware\EnsureLicenseFeature::class,
         ]);
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('crm:cleanup')->dailyAt('03:00');
         $schedule->command('crm:process-late-fees')->dailyAt('00:30');
+        $schedule->command('attendance:process-punches')->everyMinute();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

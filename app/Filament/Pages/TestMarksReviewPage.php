@@ -4,12 +4,14 @@ namespace App\Filament\Pages;
 
 use App\Filament\Pages\BulkActivityMarksImportPage;
 use App\Enums\CrmPermission;
+use App\Enums\LicenseFeature;
 use App\Enums\RoleName;
+use App\Support\CrmAccess;
+use App\Support\FeatureGate;
 use App\Models\StudentMarksheet;
 use App\Models\WhatsAppTemplate;
 use App\Services\ActivityMarksWhatsAppService;
 use App\Services\ResultDeclarationService;
-use App\Support\CrmAccess;
 use App\Support\CrmHint;
 use App\Support\ExamTestGroupMatrix;
 use Filament\Actions\Action;
@@ -28,6 +30,10 @@ class TestMarksReviewPage extends Page
 
     public static function canAccess(): bool
     {
+        if (! FeatureGate::enabled(LicenseFeature::Marks)) {
+            return false;
+        }
+
         return CrmAccess::can(Auth::user(), CrmPermission::MarksImport);
     }
 
@@ -86,6 +92,7 @@ class TestMarksReviewPage extends Page
 
     public function publishResults(ResultDeclarationService $declarations): void
     {
+        abort_unless(FeatureGate::enabled(LicenseFeature::Results), 403);
         abort_unless(CrmAccess::can(Auth::user(), CrmPermission::MarksImport), 403);
 
         $this->validate([
@@ -121,6 +128,7 @@ class TestMarksReviewPage extends Page
 
     public function issueMarksheets(ResultDeclarationService $declarations): void
     {
+        abort_unless(FeatureGate::enabled(LicenseFeature::Marksheets), 403);
         abort_unless(Auth::user()?->hasRole(RoleName::SuperAdmin->value), 403);
 
         $this->validate([
@@ -164,6 +172,52 @@ class TestMarksReviewPage extends Page
         }
     }
 
+    public function regenerateMarksheets(ResultDeclarationService $declarations): void
+    {
+        abort_unless(FeatureGate::enabled(LicenseFeature::Marksheets), 403);
+        abort_unless(Auth::user()?->hasRole(RoleName::SuperAdmin->value), 403);
+
+        $this->validate([
+            'marksheetIssueDate' => 'required|date',
+        ]);
+
+        if (blank($this->groupKey)) {
+            Notification::make()->title('Test not found')->warning()->send();
+
+            return;
+        }
+
+        try {
+            $declaration = $declarations->regenerateMarksheets(
+                (string) $this->groupKey,
+                Auth::user(),
+                $this->marksheetIssueDate,
+            );
+
+            Notification::make()
+                ->title('Marksheets regenerated')
+                ->body("PDF marksheets refreshed for {$declaration->studentMarksheets()->count()} student(s).")
+                ->success()
+                ->duration(10000)
+                ->send();
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            Notification::make()
+                ->title('Could not regenerate marksheets')
+                ->body(collect($exception->errors())->flatten()->first())
+                ->danger()
+                ->send();
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            Notification::make()
+                ->title('Could not regenerate marksheets')
+                ->body($exception->getMessage())
+                ->danger()
+                ->duration(15000)
+                ->send();
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -199,6 +253,7 @@ class TestMarksReviewPage extends Page
 
     public function queueWhatsAppCampaign(ActivityMarksWhatsAppService $marksWhatsApp): void
     {
+        abort_unless(FeatureGate::enabled(LicenseFeature::WhatsApp), 403);
         abort_unless(CrmAccess::can(Auth::user(), CrmPermission::WhatsappCampaigns), 403);
 
         $this->validate([
@@ -278,10 +333,13 @@ class TestMarksReviewPage extends Page
                     'markSheet' => $this->markSheet,
                     'groupKey' => $this->groupKey,
                     'whatsappTemplateOptions' => $this->whatsappTemplateOptions(),
-                    'canSendWhatsApp' => CrmAccess::can(Auth::user(), CrmPermission::WhatsappCampaigns),
+                    'canSendWhatsApp' => FeatureGate::enabled(LicenseFeature::WhatsApp)
+                        && CrmAccess::can(Auth::user(), CrmPermission::WhatsappCampaigns),
                     'resultStatus' => $this->resultStatus(),
-                    'canPublish' => CrmAccess::can(Auth::user(), CrmPermission::MarksImport),
-                    'canIssueMarksheet' => Auth::user()?->hasRole(RoleName::SuperAdmin->value) ?? false,
+                    'canPublish' => FeatureGate::enabled(LicenseFeature::Results)
+                        && CrmAccess::can(Auth::user(), CrmPermission::MarksImport),
+                    'canIssueMarksheet' => FeatureGate::enabled(LicenseFeature::Marksheets)
+                        && (Auth::user()?->hasRole(RoleName::SuperAdmin->value) ?? false),
                     'studentMarksheets' => $this->studentMarksheetsByStudentId(),
                 ]),
         ]);

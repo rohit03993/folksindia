@@ -9,6 +9,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use App\Filament\Pages\BulkActivityMarksImportPage;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\FeesDashboardPage;
+use App\Filament\Pages\LicenseExpiredPage;
 use App\Filament\Pages\MyAccountPage;
 use App\Filament\Pages\TestMarksReviewPage;
 use App\Support\InstituteSettings;
@@ -68,6 +69,7 @@ class RohitPanelProvider extends PanelProvider
                 BulkActivityMarksImportPage::class,
                 TestMarksReviewPage::class,
                 MyAccountPage::class,
+                LicenseExpiredPage::class,
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->widgets([
@@ -83,6 +85,7 @@ class RohitPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+                \App\Http\Middleware\EnsureLicenseActive::class,
             ])
             ->authMiddleware([
                 Authenticate::class,

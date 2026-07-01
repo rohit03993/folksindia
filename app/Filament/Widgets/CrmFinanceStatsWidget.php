@@ -2,17 +2,27 @@
 
 namespace App\Filament\Widgets;
 
-use App\Filament\Pages\BatchAttendancePage;
-use App\Enums\CrmPermission;
+use App\Filament\Pages\AttendancePage;
 use App\Filament\Widgets\Concerns\VisibleWithCrmPermission;
+use App\Enums\CrmPermission;
+use App\Enums\LicenseFeature;
 use App\Services\CrmDashboardService;
+use App\Support\CrmAccess;
+use App\Support\FeatureGate;
 use Filament\Support\Icons\Heroicon;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
+use Illuminate\Support\Facades\Auth;
 
 class CrmFinanceStatsWidget extends StatsOverviewWidget
 {
     use VisibleWithCrmPermission;
+
+    public static function canView(): bool
+    {
+        return FeatureGate::enabled(LicenseFeature::Fees)
+            && CrmAccess::can(Auth::user(), CrmPermission::DashboardFinanceStats);
+    }
 
     protected static function crmPermissionForWidget(): CrmPermission
     {
@@ -48,7 +58,7 @@ class CrmFinanceStatsWidget extends StatsOverviewWidget
                 ->description("{$stats['attendance_marked_today']} marked of {$stats['attendance_students_in_batches']} in batches")
                 ->descriptionIcon(Heroicon::OutlinedCheckCircle)
                 ->color('primary')
-                ->url(BatchAttendancePage::getUrl()),
+                ->url(AttendancePage::getUrl()),
             Stat::make('Fee Collection Today', '₹'.number_format($stats['fee_collection_today'], 2))
                 ->description('Payments recorded today')
                 ->descriptionIcon(Heroicon::OutlinedBanknotes)

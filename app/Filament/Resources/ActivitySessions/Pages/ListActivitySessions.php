@@ -10,7 +10,6 @@ use App\Filament\Resources\ActivitySessions\ActivitySessionResource;
 use App\Filament\Resources\ActivityTypes\ActivityTypeResource;
 use App\Models\ActivityType;
 use App\Models\Batch;
-use App\Support\EduExamLabels;
 use App\Services\ResultDeclarationService;
 use App\Support\ExamTestGroupMatrix;
 use Filament\Actions\Action;
