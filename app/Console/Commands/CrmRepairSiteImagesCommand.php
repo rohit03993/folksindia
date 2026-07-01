@@ -23,6 +23,8 @@ class CrmRepairSiteImagesCommand extends Command
             $this->line('Run manually: php artisan storage:link');
         }
 
+        $this->call('crm:repair-license');
+
         $fixed = $siteContent->repairBrokenRemoteImageUrls();
 
         SiteContent::clearCache();

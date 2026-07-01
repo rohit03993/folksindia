@@ -278,7 +278,17 @@ class SiteContentService
     protected function persistImage(string $key, mixed $newState): void
     {
         $oldPath = Setting::getValue($key);
-        $newPath = SiteImageService::normalizePath($newState);
+        $directory = match (true) {
+            str_ends_with($key, 'logo') => 'site/logo',
+            str_contains($key, 'hero') => 'site/hero',
+            str_contains($key, 'about_image') => 'site/hero',
+            str_contains($key, 'favicon') => 'site/favicon',
+            default => 'site',
+        };
+        $newPath = SiteImageService::finalizeUploadPath(
+            SiteImageService::normalizePath($newState),
+            $directory,
+        );
 
         SiteImageService::replace($oldPath, $newPath);
         Setting::setValue($key, $newPath ?? '', 'images');
@@ -290,7 +300,10 @@ class SiteContentService
         $keptIds = [];
 
         foreach ($items as $index => $item) {
-            $imagePath = SiteImageService::normalizePath($item['image_path'] ?? null);
+            $imagePath = SiteImageService::finalizeUploadPath(
+                SiteImageService::normalizePath($item['image_path'] ?? null),
+                'site/gallery',
+            );
 
             if (blank($imagePath)) {
                 continue;

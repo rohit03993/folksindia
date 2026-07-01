@@ -113,6 +113,12 @@ class SiteImageService
             return $path;
         }
 
+        foreach (self::pathExtensionVariants($path) as $candidate) {
+            if ($disk->exists($candidate)) {
+                return $candidate;
+            }
+        }
+
         $basename = basename($path);
 
         if ($basename === $path) {
@@ -122,10 +128,96 @@ class SiteImageService
                 if ($disk->exists($candidate)) {
                     return $candidate;
                 }
+
+                foreach (self::pathExtensionVariants($candidate) as $variant) {
+                    if ($disk->exists($variant)) {
+                        return $variant;
+                    }
+                }
             }
         }
 
         return $path;
+    }
+
+    /**
+     * Ensure an uploaded image is stored under the expected directory on the public disk.
+     */
+    public static function finalizeUploadPath(?string $path, string $directory): ?string
+    {
+        $path = self::normalizeStoragePath($path);
+
+        if (blank($path) || str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        $disk = Storage::disk(self::DISK);
+        $directory = trim($directory, '/');
+        $resolved = self::resolveExistingPath($path);
+
+        if ($resolved && $disk->exists($resolved) && str_starts_with($resolved, $directory.'/')) {
+            return $resolved;
+        }
+
+        $basename = basename($path);
+        $destination = $directory.'/'.$basename;
+
+        $sources = array_unique(array_filter([
+            $path,
+            $resolved,
+            'livewire-tmp/'.$basename,
+            ...self::pathExtensionVariants('livewire-tmp/'.$basename),
+            ...self::pathExtensionVariants($path),
+        ]));
+
+        foreach ($sources as $source) {
+            if (! $disk->exists($source)) {
+                continue;
+            }
+
+            if ($source === $destination) {
+                return $destination;
+            }
+
+            if (! $disk->exists($destination)) {
+                $disk->copy($source, $destination);
+            }
+
+            return $destination;
+        }
+
+        return $path;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function pathExtensionVariants(string $path): array
+    {
+        $path = self::normalizeStoragePath($path);
+
+        if (blank($path) || str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return [];
+        }
+
+        $info = pathinfo($path);
+        $directory = isset($info['dirname']) && $info['dirname'] !== '.' ? $info['dirname'].'/' : '';
+        $filename = $info['filename'] ?? '';
+        $extension = strtolower($info['extension'] ?? '');
+
+        if ($filename === '') {
+            return [];
+        }
+
+        $variants = [];
+
+        foreach (['jpg', 'jpeg', 'png', 'webp', 'gif'] as $ext) {
+            if ($ext !== $extension) {
+                $variants[] = $directory.$filename.'.'.$ext;
+            }
+        }
+
+        return $variants;
     }
 
     public static function existsOnDisk(?string $path): bool
