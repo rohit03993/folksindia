@@ -2,11 +2,13 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\LicenseFeature;
 use App\Enums\RoleName;
 use App\Services\SiteContentService;
 use App\Services\SiteImageService;
 use App\Support\CrmHint;
 use App\Support\CrmNavigation;
+use App\Support\FeatureGate;
 use App\Support\SiteLogo;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
@@ -53,6 +55,10 @@ class ManageSiteContent extends Page
 
     public static function canAccess(): bool
     {
+        if (! FeatureGate::enabled(LicenseFeature::Website)) {
+            return false;
+        }
+
         return Auth::user()?->hasRole(RoleName::SuperAdmin->value) ?? false;
     }
 
